@@ -1,0 +1,36 @@
+# Core Framework
+streamlit==1.37.1
+anthropic==0.34.2
+
+# LlamaIndex and Extensions
+llama-index==0.11.3
+llama-index-llms-anthropic==0.3.4
+llama-index-embeddings-huggingface==0.3.1
+# IMPORTANT: ChromaDB vector store is a separate package!
+llama-index-vector-stores-chroma>=0.1.8
+# Document Processing
+pypdf==4.3.1
+
+# Environment Management
+python-dotenv==1.0.1
+
+# AI/ML Libraries
+sentence-transformers==3.0.1
+duckduckgo-search==6.2.13
+
+# Vector Database
+chromadb==0.5.5
+
+# Data Processing - IMPORTANT: Use pandas 2.2.2 for compatibility
+pandas==2.2.2
+numpy==1.26.4
+
+# Vector Search
+# faiss-cpu==1.8.0
+
+# Web Scraping & Requests
+beautifulsoup4==4.12.3
+requests==2.32.3
+
+# Data Validation
+pydantic==2.8.2
