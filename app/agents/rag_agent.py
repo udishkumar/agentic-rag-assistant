@@ -22,7 +22,7 @@ import logging
 import time
 import hashlib
 import requests
-import torch  # <-- for safe CPU dtype and avoiding meta tensors
+import torch
 
 # --- Safe defaults for backends (helps on Apple Silicon / fresh Torch installs) ---
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")          # disable CUDA if present
@@ -108,10 +108,13 @@ class AgenticRAG:
         self.indexed_files = set()
         self.metadata_file = os.path.join(self.vector_store_path, "metadata.json")
 
-        # ---- Routing knobs (guarantee enrichment) ----
+        # ---- IMPROVED Routing knobs ----
+        self.always_enrich_modifications = True  # NEW: Enrich when asking for modifications
+        self.always_enrich_insufficient = True   # NEW: Always enrich when response is insufficient
+        self.enrich_low_relevance_threshold = 0.35  # NEW: Enrich if relevance is below this
         self.always_enrich_places = True
         self.always_enrich_open_ended = True
-        self.enrich_length_threshold = 450  # if the doc-only answer is shorter than this, enrich
+        self.enrich_length_threshold = 600  # Increased threshold
 
         # Load existing metadata
         self._load_metadata()
@@ -493,27 +496,75 @@ class AgenticRAG:
             logger.error(f"Traceback: {traceback.format_exc()}")
             return None, 0.0, []
 
-    # ------------------ Heuristics ------------------
+    # ------------------ IMPROVED Heuristics ------------------
 
     def is_response_insufficient(self, response: str) -> bool:
-        """Check if Claude's response indicates insufficient information (robust)."""
+        """IMPROVED: Check if Claude's response indicates insufficient information."""
         if not response:
             return True
         rl = response.lower()
+        
+        # Expanded list of insufficiency indicators
         kw_hits = any(
             k in rl
             for k in [
+                # Original indicators
                 "not provided in", "not mentioned in", "not available in",
                 "no information about", "cannot find", "unable to answer based on",
                 "outside the scope", "not explicitly stated", "no relevant information",
-                "missing", "unavailable", "unspecified"
+                "missing", "unavailable", "unspecified",
+                # NEW indicators found in your transcript
+                "context doesn't provide", "doesn't provide specific",
+                "the context doesn't", "document doesn't",
+                "you would need to", "need to consult", "need to make",
+                "significant modifications", "significantly alter",
+                "doesn't contain", "don't have access",
+                "apologize", "unable to provide",
+                "beyond what's provided", "beyond the",
+                "context doesn't have", "not part of",
+                "typically not", "generally not",
             ]
         )
+        
+        # Improved regex patterns
         re_hits = bool(
-            re.search(r"not\s+(provided|mentioned|available)\s+in\s+the\s+(context|text|document)", rl)
+            re.search(r"not\s+(provided|mentioned|available|contained)\s+in\s+the\s+(context|text|document|given)", rl)
+            or re.search(r"(context|document|text)\s+(doesn't|does not|didn't)\s+(provide|contain|have|include)", rl)
             or re.search(r"information\s+(is|was)\s+(missing|unavailable|not\s+provided)", rl)
+            or re.search(r"(would|will)\s+need\s+to\s+(consult|check|search|look)", rl)
+            or re.search(r"beyond\s+(what's|what is|the)\s+(provided|given|available)", rl)
         )
+        
         return kw_hits or re_hits
+
+    def _is_modification_query(self, text: str) -> bool:
+        """NEW: Detect queries asking for modifications or variations."""
+        if not text:
+            return False
+        t = text.lower()
+        
+        # Check conversation context for modification intent
+        if self.conversation_history:
+            # Common modification patterns in follow-ups
+            modification_phrases = [
+                "make it", "make this", "make that",
+                "change it", "modify it", "adjust it",
+                "how can i", "how do i", "how to",
+                "increase", "decrease", "add more", "reduce",
+                "substitute", "replace", "instead of",
+                "alternative", "variation", "variant",
+                "different way", "other way",
+                "keto", "vegan", "vegetarian", "gluten-free", "dairy-free",
+                "healthier", "lighter", "richer",
+                "more protein", "less carbs", "low fat",
+                "it's", "its"  # possessive often indicates modification
+            ]
+            
+            for phrase in modification_phrases:
+                if phrase in t:
+                    return True
+                    
+        return False
 
     def _is_doc_only_intent(self, text: str) -> bool:
         """Detect when the user explicitly wants answers ONLY from the uploaded docs."""
@@ -532,7 +583,7 @@ class AgenticRAG:
         if not text:
             return False
         t = text.lower()
-        return any(p in t for p in ["tell me about", "overview", "what is", "who is", "where is", "about "])
+        return any(p in t for p in ["tell me about", "overview", "what is", "who is", "where is", "about ", "suggest", "recommend"])
 
     def _is_place_query(self, text: str) -> bool:
         """Return True if the query looks like a place/attraction (tourism) ask."""
@@ -562,19 +613,70 @@ class AgenticRAG:
         hints = ["admission", "ticket", "tickets", "opening hours", "hours", "entry fee", "entrance fee", "contact", "website"]
         return any(h in t for h in hints)
 
-    def _should_enrich_with_web(self, q: str, answer: str) -> bool:
-        """Final decision for enrichment. Guarantees web enrichment for places and open-ended asks,
-        unless the user explicitly asked for doc-only answers."""
+    def _is_web_only_intent(self, text: str) -> bool:
+        if not text:
+            return False
+        t = text.lower()
+        phrases = [
+            "search the web", "search online", "google this", "google it",
+            "web only", "use web search", "check the internet", "look up online",
+            "search for", "find online"
+        ]
+        return any(p in t for p in phrases)
+
+    def _is_vague_followup(self, text: str) -> bool:
+        if not text:
+            return False
+        t = text.lower()
+        return any(p in t for p in ["variants", "other recipes", "more such", "similar ones", "more", "suggest", "alternatives"])
+
+    def _should_enrich_with_web(self, q: str, answer: str, doc_relevance: float = 1.0) -> bool:
+        """IMPROVED: Final decision for enrichment with more aggressive triggers."""
+        # Never enrich if user explicitly wants doc-only
         if self._is_doc_only_intent(q):
             return False
+            
+        # NEW: Always enrich if doc relevance is low
+        if doc_relevance < self.enrich_low_relevance_threshold:
+            logger.info(f"Enriching due to low relevance: {doc_relevance:.3f}")
+            return True
+            
+        # NEW: Always enrich modification queries
+        if self.always_enrich_modifications and self._is_modification_query(q):
+            logger.info("Enriching modification query")
+            return True
+            
+        # Always enrich place queries
         if self.always_enrich_places and self._is_place_query(q):
+            logger.info("Enriching place query")
             return True
-        if self.is_response_insufficient(answer):
+            
+        # NEW: Always enrich if response admits insufficiency
+        if self.always_enrich_insufficient and self.is_response_insufficient(answer):
+            logger.info("Enriching due to insufficient response")
             return True
+            
+        # Always enrich open-ended queries
         if self.always_enrich_open_ended and self._is_open_ended(q):
+            logger.info("Enriching open-ended query")
             return True
+            
+        # Enrich if response is suspiciously short
         if len(answer or "") < self.enrich_length_threshold:
+            logger.info(f"Enriching due to short response: {len(answer)} chars")
             return True
+            
+        # NEW: Check for generic/padding language that suggests insufficiency
+        generic_indicators = [
+            "for more", "consult", "refer to", "check with",
+            "you could", "you might", "you may want to",
+            "it's important to", "remember to", "make sure to",
+            "typically", "generally", "usually", "often"
+        ]
+        if any(ind in answer.lower() for ind in generic_indicators):
+            logger.info("Enriching due to generic/padding language")
+            return True
+            
         return False
 
     # ------------------ LLM Orchestration ------------------
@@ -590,7 +692,8 @@ class AgenticRAG:
         if tool_used == "rag_search":
             system_prompt = (
                 "You are an intelligent assistant that answers questions based on provided document context. "
-                "Use the context verbatim when possible. If the context doesn't fully answer, say what's missing."
+                "Use the context verbatim when possible. If the context doesn't fully answer, say what's missing. "
+                "Be honest about limitations - if information is incomplete, say so clearly."
             )
             user_prompt = (
                 f"Based on the following context from the documents, answer this question: {query}\n\n"
@@ -599,8 +702,9 @@ class AgenticRAG:
             )
         elif tool_used == "web_search":
             system_prompt = (
-                "You are an intelligent assistant that answers questions using web search results. "
-                "Synthesize information from multiple sources and be up-to-date."
+                "You are an intelligent assistant that answers questions using web search results.\n"
+                "You HAVE been provided search results; do not claim you cannot search the web.\n"
+                "If results are sparse, say what's missing, and still give best-effort guidance."
             )
             user_prompt = (
                 f"Based on the following web search results, answer this question: {query}\n\n"
@@ -609,7 +713,9 @@ class AgenticRAG:
             )
         elif tool_used == "combined":
             system_prompt = (
-                "You are an intelligent assistant that combines information from documents and web search. "
+                "You are an intelligent assistant that combines information from documents and web search.\n"
+                "You HAVE been provided both; do not claim you cannot search the web.\n"
+                "Synthesize information from both sources to provide the most complete answer.\n"
                 "Clearly indicate which information comes from documents vs web when appropriate."
             )
             user_prompt = (
@@ -668,36 +774,48 @@ class AgenticRAG:
             return f"I encountered an error generating a response: {str(e)}"
 
     def process_query(self, query: str) -> AgentResponse:
-        """Agentic processing pipeline: docs → web → general"""
+        """Agentic processing pipeline with improved enrichment logic"""
         logger.info(f"Processing query: {query}")
+
+        # Expand vague follow-ups using prior user turn
+        effective_query = query
+        if self._is_vague_followup(query) and self.conversation_history:
+            prev_users = [h.get("user", "") for h in self.conversation_history if "user" in h]
+            if prev_users:
+                prev = prev_users[-1]
+                if prev and prev.strip():
+                    effective_query = f"{query} (context: {prev})"
 
         all_contexts: List[str] = []
         all_sources: List[str] = []
         tools_used: List[str] = []
 
-        # Step 1: Try document search if available
+        # Web-only flag (skip docs if user asked explicitly)
+        web_only = self._is_web_only_intent(query)
+
+        # Step 1: Try document search if available and not web-only
         doc_context = None
         doc_relevance = 0.0
         doc_sources: List[str] = []
         force_web = False
 
-        if self.index is not None and self.retriever is not None:
+        if not web_only and self.index is not None and self.retriever is not None:
             logger.info("Attempting document search...")
-            doc_context, doc_relevance, doc_sources = self.query_documents_with_relevance(query)
+            doc_context, doc_relevance, doc_sources = self.query_documents_with_relevance(effective_query)
 
-            if doc_context and doc_relevance > 0.2:
+            if doc_context:  # Even if relevance is low, we got something
                 # Generate initial response from documents
                 initial_response = self.generate_response(query, doc_context, "rag_search")
 
-                # Decide whether to enrich with web
-                if self._should_enrich_with_web(query, initial_response):
-                    logger.info("Enrichment triggered: adding web search (doc context retained).")
+                # IMPROVED: More aggressive enrichment decision
+                if self._should_enrich_with_web(query, initial_response, doc_relevance):
+                    logger.info(f"Enrichment triggered (relevance: {doc_relevance:.3f})")
                     all_contexts.append(f"Document Context:\n{doc_context}")
                     all_sources.extend(doc_sources)
                     tools_used.append("rag_search")
                     force_web = True
                 else:
-                    # Check if query needs current info
+                    # Check if query needs current info (unchanged)
                     query_lower = query.lower()
                     needs_current_info = any(
                         word in query_lower
@@ -710,37 +828,53 @@ class AgenticRAG:
                         tools_used.append("rag_search")
                         force_web = True
                     else:
-                        logger.info("Document search provided sufficient answer (no enrichment).")
-                        return AgentResponse(
-                            answer=initial_response,
-                            sources=doc_sources,
-                            confidence=max(doc_relevance, 0.7),
-                            tool_used="rag_search",
-                            metadata={
-                                "timestamp": datetime.now().isoformat(),
-                                "query_length": len(query),
-                                "response_length": len(initial_response),
-                            },
-                        )
+                        # Only return doc-only response if we're confident it's sufficient
+                        if doc_relevance > 0.5 and not self.is_response_insufficient(initial_response):
+                            logger.info("Document search provided sufficient answer (no enrichment).")
+                            return AgentResponse(
+                                answer=initial_response,
+                                sources=doc_sources,
+                                confidence=max(doc_relevance, 0.7),
+                                tool_used="rag_search",
+                                metadata={
+                                    "timestamp": datetime.now().isoformat(),
+                                    "query_length": len(query),
+                                    "response_length": len(initial_response),
+                                },
+                            )
+                        else:
+                            # Low confidence or insufficient - force web enrichment
+                            logger.info(f"Low confidence ({doc_relevance:.3f}) or insufficient response - forcing web enrichment")
+                            all_contexts.append(f"Document Context:\n{doc_context}")
+                            all_sources.extend(doc_sources)
+                            tools_used.append("rag_search")
+                            force_web = True
             else:
-                logger.info(f"Document search relevance too low ({doc_relevance:.3f}), will search web")
+                logger.info("No relevant document content found, will search web")
+                force_web = True
         else:
-            logger.info("No documents indexed, will use web search or general knowledge")
+            if web_only:
+                logger.info("User requested web-only search; skipping document retrieval.")
+            else:
+                logger.info("No documents indexed, will use web search or general knowledge")
+            force_web = True
 
         # Step 2: Perform web search when needed/forced
         query_lower = query.lower()
         needs_web_search = (
-            force_web
+            web_only
+            or force_web
             or any(
                 word in query_lower
-                for word in ["search", "find", "latest", "current", "recent", "news", "today", "2024", "2025", "update", "new"]
+                for word in ["search", "find", "latest", "current", "recent", "news", "today", "2024", "2025", "update", "new", "google"]
             )
             or (self.index is None and any(word in query_lower for word in ["what", "when", "where", "who", "how", "why"]))
         )
 
         if needs_web_search:
             logger.info("Performing web search for comprehensive answer...")
-            search_results = self.web_search(query)
+
+            search_results = self.web_search(effective_query)
             if search_results:
                 web_context = json.dumps(search_results, indent=2)
                 all_contexts.append(f"Web Search Results:\n{web_context}")
@@ -768,6 +902,10 @@ class AgenticRAG:
             confidence = 0.6
             tool_description = "general_knowledge"
 
+        # Adjust confidence if answer still signals insufficiency
+        if self.is_response_insufficient(final_response):
+            confidence = min(confidence, 0.55)
+
         # Store in conversation history
         self.conversation_history.append(
             {"user": query, "assistant": final_response, "timestamp": datetime.now().isoformat()}
@@ -785,7 +923,7 @@ class AgenticRAG:
                 "query_length": len(query),
                 "response_length": len(final_response),
                 "tools_used": tools_used,
-                "doc_relevance": doc_relevance if doc_context else 0,
+                "doc_relevance": doc_relevance if (doc_context is not None) else 0,
             },
         )
 
