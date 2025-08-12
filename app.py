@@ -25,244 +25,36 @@ DEVELOPER = "Udish Kumar"
 
 # Page configuration
 st.set_page_config(
-    page_title=f"{PROJECT_NAME} - Intelligent RAG Agent",
+    page_title=f"{PROJECT_NAME} - Intelligent RAG Assistant",
     page_icon="🧘",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Enhanced Mobile-Responsive CSS with Fixed Text Colors
+# Minimal custom CSS (only for special branding elements)
 st.markdown("""
 <style>
-    /* Base styles */
-    .stApp { 
-        background-color: #f0f2f6; 
-    }
-    
-    /* Ensure all text is dark/black */
-    .stMarkdown, .stText, p, span, div, label {
-        color: #262730 !important;
-    }
-    
-    /* Headers should be dark */
-    h1, h2, h3, h4, h5, h6 {
-        color: #262730 !important;
-    }
-    
-    /* Chat message styling with mobile responsiveness */
-    .chat-message { 
-        padding: 1rem; 
-        margin: 0.5rem 0; 
-        border-radius: 0.5rem; 
-    }
-    
-    .user-message { 
-        background-color: #e3f2fd; 
-        margin-left: 20%; 
-        color: #262730 !important;
-    }
-    
-    .assistant-message { 
-        background-color: #ffffff; 
-        margin-right: 20%; 
-        border: 1px solid #e0e0e0;
-        color: #262730 !important;
-    }
-    
-    /* Ensure chat messages have dark text */
-    div[data-testid="stChatMessage"] * {
-        color: #262730 !important;
-    }
-    
-    .source-card { 
-        background-color: #f5f5f5; 
-        padding: 0.5rem; 
-        margin: 0.25rem 0; 
-        border-radius: 0.25rem; 
-        font-size: 0.9rem;
-        color: #262730 !important;
-    }
-    
-    .metric-card { 
-        background-color: #ffffff; 
-        padding: 1rem; 
-        border-radius: 0.5rem; 
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        color: #262730 !important;
-    }
-    
-    /* Sidebar text should be dark */
-    section[data-testid="stSidebar"] * {
-        color: #262730 !important;
-    }
-    
-    /* Metrics text */
-    div[data-testid="metric-container"] * {
-        color: #262730 !important;
-    }
-    
-    /* Caption text */
-    .stCaption {
-        color: #555555 !important;
-    }
-    
-    /* Tab text */
-    button[data-baseweb="tab"] {
-        color: #262730 !important;
-    }
-    
-    /* Expander text */
-    details summary {
-        color: #262730 !important;
-    }
-    
-    /* Info/Warning/Success/Error boxes text */
-    .stAlert * {
-        color: #262730 !important;
-    }
-    
-    /* Popover text */
-    div[data-testid="stPopover"] * {
-        color: #262730 !important;
-    }
-    
-    /* Hide the status widget that appears during indexing */
-    div[data-testid="stStatusWidget"] { 
-        display: none; 
-    }
-    
-    /* PRAGYA branding colors */
+    /* PRAGYA branding gradient */
     .pragya-header {
         background: linear-gradient(90deg, #ff9933, #ffffff, #138808);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         background-clip: text;
         font-weight: bold;
+        font-size: 2em;
+        text-align: center;
+        padding: 10px;
     }
     
-    /* Mobile-specific styles */
-    @media (max-width: 768px) {
-        /* Ensure mobile text is dark */
-        * {
-            color: #262730 !important;
-        }
-        
-        /* Adjust chat message margins for mobile */
-        .user-message { 
-            margin-left: 5%; 
-            margin-right: 0;
-        }
-        
-        .assistant-message { 
-            margin-right: 5%; 
-            margin-left: 0;
-        }
-        
-        /* Make sidebar more compact on mobile */
-        section[data-testid="stSidebar"] > div {
-            padding: 1rem 0.5rem;
-        }
-        
-        /* Ensure sidebar text is visible on mobile */
-        section[data-testid="stSidebar"] * {
-            color: #262730 !important;
-        }
-        
-        /* Adjust columns for mobile */
-        div[data-testid="column"] {
-            width: 100% !important;
-            margin-bottom: 0.5rem;
-        }
-        
-        /* Make metrics more compact */
-        div[data-testid="metric-container"] {
-            padding: 0.5rem;
-        }
-        
-        /* Smaller fonts for mobile but keep dark */
-        .stMarkdown {
-            font-size: 14px;
-            color: #262730 !important;
-        }
-        
-        /* Make buttons full width on mobile */
-        button[kind="secondary"], button[kind="primary"] {
-            width: 100% !important;
-        }
-        
-        /* Adjust file uploader for mobile */
-        div[data-testid="stFileUploader"] {
-            padding: 0.5rem;
-        }
-        
-        /* Make expandable sections more touch-friendly */
-        details {
-            padding: 0.5rem;
-        }
-        
-        /* Adjust chat input for mobile */
-        div[data-testid="stChatInput"] {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            z-index: 999;
-            background: white;
-            padding: 0.5rem;
-            box-shadow: 0 -2px 4px rgba(0,0,0,0.1);
-        }
-        
-        /* Add padding at bottom to account for fixed chat input */
-        .main .block-container {
-            padding-bottom: 100px;
-        }
-        
-        /* Make popovers mobile-friendly */
-        div[data-testid="stPopover"] {
-            max-width: 90vw;
-        }
-        
-        /* Ensure all mobile text stays dark */
-        p, span, div, label, h1, h2, h3, h4, h5, h6 {
-            color: #262730 !important;
-        }
-    }
+    /* Hide Streamlit's hamburger menu if desired */
+    #MainMenu {visibility: hidden;}
     
-    /* Tablet-specific adjustments */
-    @media (min-width: 769px) and (max-width: 1024px) {
-        .user-message { 
-            margin-left: 10%; 
-        }
-        
-        .assistant-message { 
-            margin-right: 10%; 
-        }
-        
-        /* Ensure tablet text is dark */
-        * {
-            color: #262730 !important;
-        }
-    }
+    /* Hide footer if desired */
+    footer {visibility: hidden;}
     
-    /* Improve touch targets */
-    button, a, input, textarea, select {
-        min-height: 44px;
-        min-width: 44px;
-    }
-    
-    /* Better scrolling on mobile */
-    * {
-        -webkit-overflow-scrolling: touch;
-    }
-    
-    /* Links should be visible */
-    a {
-        color: #0066cc !important;
-        text-decoration: none;
-    }
-    
-    a:hover {
-        text-decoration: underline;
+    /* Hide the status widget that appears during indexing */
+    div[data-testid="stStatusWidget"] {
+        display: none;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -276,22 +68,28 @@ if 'agent' not in st.session_state:
         st.stop()
 
     with st.spinner(f"🕉️ Initializing {PROJECT_NAME}..."):
-        st.session_state.agent = AgenticRAG(
-            anthropic_api_key=api_key,
-            vector_store_path=os.getenv('VECTOR_STORE_PATH', './data/vector_store'),
-            upload_path=os.getenv('UPLOAD_PATH', './data/uploads')
-        )
+        try:
+            st.session_state.agent = AgenticRAG(
+                anthropic_api_key=api_key,
+                vector_store_path=os.getenv('VECTOR_STORE_PATH', './data/vector_store'),
+                upload_path=os.getenv('UPLOAD_PATH', './data/uploads')
+            )
+            
+            # Check if there are existing documents to load
+            upload_path = os.getenv('UPLOAD_PATH', './data/uploads')
+            if os.path.exists(upload_path):
+                pdf_files = [f for f in os.listdir(upload_path) if f.endswith('.pdf')]
+                if pdf_files:
+                    with st.spinner(f"📚 Loading {len(pdf_files)} existing documents..."):
+                        success = st.session_state.agent.load_documents()
+                        if success:
+                            st.success(f"✅ Loaded {len(pdf_files)} documents from previous session")
+        except Exception as e:
+            st.error(f"Failed to initialize PRAGYA: {str(e)}")
+            st.info("Try clearing the cache: rm -rf ~/.cache/huggingface/hub/")
+            st.stop()
 
-        # Check if there are existing documents to load
-        upload_path = os.getenv('UPLOAD_PATH', './data/uploads')
-        if os.path.exists(upload_path):
-            pdf_files = [f for f in os.listdir(upload_path) if f.endswith('.pdf')]
-            if pdf_files:
-                with st.spinner(f"📚 Loading {len(pdf_files)} existing documents..."):
-                    success = st.session_state.agent.load_documents()
-                    if success:
-                        st.success(f"✅ Loaded {len(pdf_files)} documents from previous session")
-
+# Initialize other session states
 if 'messages' not in st.session_state:
     st.session_state.messages = []
 
@@ -317,8 +115,8 @@ def get_files_hash(files):
 
 # Sidebar
 with st.sidebar:
-    # PRAGYA Branding
-    st.markdown(f"# 🧘 {PROJECT_NAME}")
+    # PRAGYA Branding with gradient
+    st.markdown('<p class="pragya-header">🧘 PRAGYA</p>', unsafe_allow_html=True)
     st.caption(PROJECT_HINDI)
     st.markdown("---")
 
@@ -328,7 +126,7 @@ with st.sidebar:
     # Get current system info for display
     system_info = st.session_state.agent.get_system_info()
 
-    # Show current document status with mobile-friendly display
+    # Show current document status
     if system_info['documents_loaded'] > 0:
         st.success(f"✅ {system_info['documents_loaded']} docs ready")
 
@@ -364,7 +162,6 @@ with st.sidebar:
                         existing_content = f.read()
                     new_content = bytes(uploaded_file.getbuffer())
                     if existing_content == new_content:
-                        # Shorten filename for mobile
                         short_name = uploaded_file.name[:20] + "..." if len(uploaded_file.name) > 23 else uploaded_file.name
                         st.info(f"📄 {short_name} exists")
                         continue
@@ -373,7 +170,6 @@ with st.sidebar:
                     f.write(bytes(uploaded_file.getbuffer()))
                 saved_files.append(uploaded_file.name)
                 new_files.append(uploaded_file.name)
-                # Shorten filename for mobile
                 short_name = uploaded_file.name[:20] + "..." if len(uploaded_file.name) > 23 else uploaded_file.name
                 st.success(f"✅ {short_name}")
 
@@ -387,23 +183,20 @@ with st.sidebar:
                     st.error("❌ Indexing failed")
 
         st.session_state.processing_documents = False
-
-        # Clear the file uploader by rerunning
         time.sleep(1)
         st.rerun()
 
-    # System Info - Mobile optimized
+    # System Info
     st.markdown("---")
     st.header("📊 Status")
 
-    # Use single column on mobile (handled by CSS)
     col1, col2 = st.columns(2)
     with col1:
         st.metric("Docs", system_info['documents_loaded'])
     with col2:
         st.metric("History", system_info['conversation_length'])
 
-    # Index status with mobile-friendly display
+    # Index status
     if system_info['index_ready']:
         st.success("✅ Ready")
         with st.expander("Details"):
@@ -413,15 +206,14 @@ with st.sidebar:
         st.warning("⚠️ No docs")
         st.caption("Upload PDFs first")
 
-    # Document list - mobile optimized
+    # Document list
     if system_info['document_list']:
         with st.expander(f"📁 Docs ({len(system_info['document_list'])})", expanded=False):
             for doc in system_info['document_list']:
-                # Truncate long names for mobile
                 display_name = doc if len(doc) <= 25 else doc[:22] + "..."
                 st.text(f"📄 {display_name}")
 
-    # Tool Status - simplified for mobile
+    # Tool Status
     st.markdown("---")
     with st.expander("🛠️ Tools", expanded=False):
         tools_status = {
@@ -431,23 +223,22 @@ with st.sidebar:
             "🗄️ DB": "✅"
         }
         
-        # Display in a compact grid
         cols = st.columns(4)
         for i, (tool, status) in enumerate(tools_status.items()):
             with cols[i]:
                 st.write(f"{tool}\n{status}")
 
-    # Action buttons - mobile friendly
+    # Action buttons
     st.markdown("---")
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("🗑️ Clear", use_container_width=True, key="clear_btn"):
+        if st.button("🗑️ Clear", use_container_width=True):
             st.session_state.messages = []
             st.session_state.agent.clear_conversation()
             st.rerun()
 
     with col2:
-        if st.button("🔄 Re-index", use_container_width=True, key="reindex_btn"):
+        if st.button("🔄 Re-index", use_container_width=True):
             with st.spinner("Re-indexing..."):
                 success = st.session_state.agent.load_documents(force_reload=True)
                 if success:
@@ -457,7 +248,7 @@ with st.sidebar:
             time.sleep(1)
             st.rerun()
 
-    # About section - Updated for PRAGYA
+    # About section
     st.markdown("---")
     with st.expander("ℹ️ About PRAGYA", expanded=False):
         st.markdown(f"""
@@ -478,10 +269,10 @@ with st.sidebar:
         """)
 
 # Main chat interface
-st.markdown(f"# 🧘 {PROJECT_NAME}")
+st.markdown('<p class="pragya-header">🧘 PRAGYA</p>', unsafe_allow_html=True)
 st.caption(f"*{PROJECT_TAGLINE}*")
 
-# Mobile-friendly capability display
+# Capability display
 system_info = st.session_state.agent.get_system_info()
 if system_info['index_ready']:
     st.caption(f"📚 {system_info['documents_loaded']} docs | 🌐 Web | 🤖 AI | 💡 Wisdom Mode Active")
@@ -493,10 +284,9 @@ for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-        # Display metadata for assistant messages - mobile optimized
+        # Display metadata for assistant messages
         if message["role"] == "assistant":
-            # Use 2 columns on mobile, 4 on desktop (CSS handles this)
-            metadata_cols = st.columns([2, 2, 2, 2])
+            metadata_cols = st.columns(4)
 
             with metadata_cols[0]:
                 if "tool_used" in message:
@@ -507,17 +297,17 @@ for message in st.session_state.messages:
                         "rag_search + web_search": "📚🌐",
                         "combined": "📚🌐"
                     }.get(message['tool_used'], "🛠️")
-                    st.caption(f"{tool_emoji}")
+                    st.caption(f"{tool_emoji} {message['tool_used']}")
 
             with metadata_cols[1]:
                 if "confidence" in message:
                     confidence = message.get('confidence', 0)
                     if confidence >= 0.8:
-                        st.caption(f"✅ {confidence:.0%}")
+                        st.caption(f"✅ High: {confidence:.0%}")
                     elif confidence >= 0.6:
-                        st.caption(f"📊 {confidence:.0%}")
+                        st.caption(f"📊 Medium: {confidence:.0%}")
                     else:
-                        st.caption(f"⚠️ {confidence:.0%}")
+                        st.caption(f"⚠️ Low: {confidence:.0%}")
 
             with metadata_cols[2]:
                 if "timestamp" in message:
@@ -525,19 +315,16 @@ for message in st.session_state.messages:
 
             with metadata_cols[3]:
                 if "sources" in message and message["sources"]:
-                    with st.popover("📚"):
-                        st.markdown("**Sources:**")
+                    with st.popover("📚 Sources"):
                         for source in message["sources"]:
                             if isinstance(source, str) and source.startswith("http"):
-                                # Shorten URLs for mobile
                                 display_text = source.split('/')[2] if len(source.split('/')) > 2 else source[:30]
                                 st.markdown(f"🔗 [{display_text}]({source})")
                             else:
-                                # Shorten document names
                                 display_text = source[:30] + "..." if len(source) > 33 else source
                                 st.markdown(f"📄 {display_text}")
 
-# Chat input with PRAGYA branding
+# Chat input
 if prompt := st.chat_input(f"Ask {PROJECT_NAME} anything... (प्रज्ञा से कुछ भी पूछें)"):
     if st.session_state.processing_documents:
         st.warning("⏳ Indexing in progress...")
@@ -558,7 +345,7 @@ if prompt := st.chat_input(f"Ask {PROJECT_NAME} anything... (प्रज्ञ�
             message_placeholder.markdown(response.answer)
 
             with metadata_placeholder.container():
-                metadata_cols = st.columns([2, 2, 2, 2])
+                metadata_cols = st.columns(4)
 
                 with metadata_cols[0]:
                     tool_emoji = {
@@ -568,23 +355,22 @@ if prompt := st.chat_input(f"Ask {PROJECT_NAME} anything... (प्रज्ञ�
                         "rag_search + web_search": "📚🌐",
                         "combined": "📚🌐"
                     }.get(response.tool_used, "🛠️")
-                    st.caption(f"{tool_emoji}")
+                    st.caption(f"{tool_emoji} {response.tool_used}")
 
                 with metadata_cols[1]:
                     if response.confidence >= 0.8:
-                        st.caption(f"✅ {response.confidence:.0%}")
+                        st.caption(f"✅ High: {response.confidence:.0%}")
                     elif response.confidence >= 0.6:
-                        st.caption(f"📊 {response.confidence:.0%}")
+                        st.caption(f"📊 Medium: {response.confidence:.0%}")
                     else:
-                        st.caption(f"⚠️ {response.confidence:.0%}")
+                        st.caption(f"⚠️ Low: {response.confidence:.0%}")
 
                 with metadata_cols[2]:
-                    st.caption(f"⏱️ {datetime.now().strftime('%H:%M')}")
+                    st.caption(f"⏱️ {datetime.now().strftime('%H:%M:%S')}")
 
                 with metadata_cols[3]:
                     if response.sources:
-                        with st.popover("📚"):
-                            st.markdown("**Sources:**")
+                        with st.popover("📚 Sources"):
                             for source in response.sources:
                                 if isinstance(source, str) and source.startswith("http"):
                                     display_text = source.split('/')[2] if len(source.split('/')) > 2 else source[:30]
@@ -599,14 +385,13 @@ if prompt := st.chat_input(f"Ask {PROJECT_NAME} anything... (प्रज्ञ�
                 "sources": response.sources,
                 "tool_used": response.tool_used,
                 "confidence": response.confidence,
-                "timestamp": datetime.now().strftime('%H:%M')
+                "timestamp": datetime.now().strftime('%H:%M:%S')
             })
 
-# Helpful prompts if no messages - mobile optimized
+# Helpful prompts if no messages
 if not st.session_state.messages:
     st.markdown("---")
     
-    # Stack vertically on mobile
     st.markdown(f"### 💡 Ask {PROJECT_NAME}:")
     
     tab1, tab2, tab3 = st.tabs(["📚 Documents", "🌐 Web", "🧠 General"])
@@ -634,13 +419,12 @@ if not st.session_state.messages:
 
     st.info(f"💡 {PROJECT_NAME} (प्रज्ञा) automatically chooses the best source for your answer - combining ancient wisdom with modern AI!")
 
-# Mobile-friendly footer with PRAGYA branding
+# Footer
 st.markdown("---")
 st.markdown(f"""
-<div style='text-align: center; color: #262730; font-size: 12px; padding: 10px;'>
+<div style='text-align: center; color: #666; font-size: 12px; padding: 10px;'>
     <p><strong>{PROJECT_NAME}</strong> - {PROJECT_HINDI}</p>
-    <p style='color: #555555;'>Powered by Claude AI 🤖 | ChromaDB 🗄️ | Google 🔎</p>
-    <p style='color: #555555;'>Developed with ❤️ by {DEVELOPER} | {PROJECT_VERSION}</p>
-    <p style='color: #777777; font-size: 10px;'><em>"{PROJECT_TAGLINE}"</em></p>
+    <p>Powered by Claude AI 🤖 | ChromaDB 🗄️ | Google 🔎</p>
+    <p>Developed with ❤️ by {DEVELOPER} | {PROJECT_VERSION}</p>
 </div>
 """, unsafe_allow_html=True)

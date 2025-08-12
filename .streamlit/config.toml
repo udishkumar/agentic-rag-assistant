@@ -1,0 +1,64 @@
+# .streamlit/config.toml
+# Configuration file for PRAGYA - Intelligent RAG Assistant
+
+[theme]
+# Primary color - Saffron (from Indian flag, perfect for PRAGYA)
+primaryColor = "#FF9933"
+
+# Background colors - Clean white theme
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F0F2F6"
+
+# Text color - Dark for readability
+textColor = "#262730"
+
+# Font
+font = "sans serif"
+
+# Force light mode as base
+base = "light"
+
+[server]
+# Server configuration
+port = 8501
+headless = true
+runOnSave = true
+
+# Increase file upload size limit (for PDFs)
+maxUploadSize = 50
+
+# Enable CORS if needed
+enableCORS = false
+enableXsrfProtection = true
+
+[browser]
+# Automatically open browser on run
+serverAddress = "localhost"
+gatherUsageStats = false
+
+# Set custom tab title
+# serverPort = 8501
+
+[runner]
+# Magic commands
+magicEnabled = true
+
+# Install packages automatically
+installTracer = false
+fixMatplotlib = true
+
+[client]
+# Show error messages in the browser
+showErrorDetails = true
+
+# Nicer toolbar
+toolbarMode = "minimal"
+
+[logger]
+# Logging configuration
+level = "info"
+messageFormat = "%(asctime)s %(message)s"
+
+[deprecation]
+# Hide deprecation warnings in the browser
+showPyplotGlobalUse = false

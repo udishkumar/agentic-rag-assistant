@@ -435,7 +435,7 @@ class AgenticRAG:
         except Exception as e:
             logger.error(f"Web search error: {str(e)}")
             return []
-
+    
     def query_documents_with_relevance(
         self, query: str
     ) -> Tuple[Optional[str], float, List[str]]:
