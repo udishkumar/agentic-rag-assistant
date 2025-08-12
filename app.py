@@ -24,17 +24,145 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS
+# Enhanced Mobile-Responsive CSS
 st.markdown("""
 <style>
-    .stApp { background-color: #f0f2f6; }
-    .chat-message { padding: 1rem; margin: 0.5rem 0; border-radius: 0.5rem; }
-    .user-message { background-color: #e3f2fd; margin-left: 20%; }
-    .assistant-message { background-color: #ffffff; margin-right: 20%; border: 1px solid #e0e0e0; }
-    .source-card { background-color: #f5f5f5; padding: 0.5rem; margin: 0.25rem 0; border-radius: 0.25rem; font-size: 0.9rem; }
-    .metric-card { background-color: #ffffff; padding: 1rem; border-radius: 0.5rem; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+    /* Base styles */
+    .stApp { 
+        background-color: #f0f2f6; 
+    }
+    
+    /* Chat message styling with mobile responsiveness */
+    .chat-message { 
+        padding: 1rem; 
+        margin: 0.5rem 0; 
+        border-radius: 0.5rem; 
+    }
+    
+    .user-message { 
+        background-color: #e3f2fd; 
+        margin-left: 20%; 
+    }
+    
+    .assistant-message { 
+        background-color: #ffffff; 
+        margin-right: 20%; 
+        border: 1px solid #e0e0e0; 
+    }
+    
+    .source-card { 
+        background-color: #f5f5f5; 
+        padding: 0.5rem; 
+        margin: 0.25rem 0; 
+        border-radius: 0.25rem; 
+        font-size: 0.9rem; 
+    }
+    
+    .metric-card { 
+        background-color: #ffffff; 
+        padding: 1rem; 
+        border-radius: 0.5rem; 
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1); 
+    }
+    
     /* Hide the status widget that appears during indexing */
-    div[data-testid="stStatusWidget"] { display: none; }
+    div[data-testid="stStatusWidget"] { 
+        display: none; 
+    }
+    
+    /* Mobile-specific styles */
+    @media (max-width: 768px) {
+        /* Adjust chat message margins for mobile */
+        .user-message { 
+            margin-left: 5%; 
+            margin-right: 0;
+        }
+        
+        .assistant-message { 
+            margin-right: 5%; 
+            margin-left: 0;
+        }
+        
+        /* Make sidebar more compact on mobile */
+        section[data-testid="stSidebar"] > div {
+            padding: 1rem 0.5rem;
+        }
+        
+        /* Adjust columns for mobile */
+        div[data-testid="column"] {
+            width: 100% !important;
+            margin-bottom: 0.5rem;
+        }
+        
+        /* Make metrics more compact */
+        div[data-testid="metric-container"] {
+            padding: 0.5rem;
+        }
+        
+        /* Smaller fonts for mobile */
+        .stMarkdown {
+            font-size: 14px;
+        }
+        
+        /* Make buttons full width on mobile */
+        button[kind="secondary"], button[kind="primary"] {
+            width: 100% !important;
+        }
+        
+        /* Adjust file uploader for mobile */
+        div[data-testid="stFileUploader"] {
+            padding: 0.5rem;
+        }
+        
+        /* Make expandable sections more touch-friendly */
+        details {
+            padding: 0.5rem;
+        }
+        
+        /* Adjust chat input for mobile */
+        div[data-testid="stChatInput"] {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            z-index: 999;
+            background: white;
+            padding: 0.5rem;
+            box-shadow: 0 -2px 4px rgba(0,0,0,0.1);
+        }
+        
+        /* Add padding at bottom to account for fixed chat input */
+        .main .block-container {
+            padding-bottom: 100px;
+        }
+        
+        /* Make popovers mobile-friendly */
+        div[data-testid="stPopover"] {
+            max-width: 90vw;
+        }
+    }
+    
+    /* Tablet-specific adjustments */
+    @media (min-width: 769px) and (max-width: 1024px) {
+        .user-message { 
+            margin-left: 10%; 
+        }
+        
+        .assistant-message { 
+            margin-right: 10%; 
+        }
+    }
+    
+    /* Improve touch targets */
+    button, a, input, textarea, select {
+        min-height: 44px;
+        min-width: 44px;
+    }
+    
+    /* Better scrolling on mobile */
+    * {
+        -webkit-overflow-scrolling: touch;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -88,24 +216,24 @@ def get_files_hash(files):
 
 # Sidebar
 with st.sidebar:
-    st.title("🤖 Agentic RAG Assistant")
+    st.title("🤖 RAG Assistant")
     st.markdown("---")
 
     # File upload section
-    st.header("📄 Document Upload")
+    st.header("📄 Documents")
 
     # Get current system info for display
     system_info = st.session_state.agent.get_system_info()
 
-    # Show current document status
+    # Show current document status with mobile-friendly display
     if system_info['documents_loaded'] > 0:
-        st.success(f"✅ {system_info['documents_loaded']} documents indexed")
+        st.success(f"✅ {system_info['documents_loaded']} docs ready")
 
     uploaded_files = st.file_uploader(
-        "Choose PDF files",
+        "Upload PDFs",
         accept_multiple_files=True,
         type=['pdf'],
-        help="Upload PDF documents to enable document-based Q&A",
+        help="Upload PDFs for Q&A",
         key="pdf_uploader"
     )
 
@@ -123,7 +251,7 @@ with st.sidebar:
         saved_files = []
         new_files = []
 
-        with st.spinner("📁 Saving files..."):
+        with st.spinner("Saving..."):
             for uploaded_file in uploaded_files:
                 file_path = os.path.join(upload_path, uploaded_file.name)
 
@@ -133,23 +261,27 @@ with st.sidebar:
                         existing_content = f.read()
                     new_content = bytes(uploaded_file.getbuffer())
                     if existing_content == new_content:
-                        st.info(f"📄 {uploaded_file.name} already exists")
+                        # Shorten filename for mobile
+                        short_name = uploaded_file.name[:20] + "..." if len(uploaded_file.name) > 23 else uploaded_file.name
+                        st.info(f"📄 {short_name} exists")
                         continue
 
                 with open(file_path, "wb") as f:
                     f.write(bytes(uploaded_file.getbuffer()))
                 saved_files.append(uploaded_file.name)
                 new_files.append(uploaded_file.name)
-                st.success(f"✅ Saved: {uploaded_file.name}")
+                # Shorten filename for mobile
+                short_name = uploaded_file.name[:20] + "..." if len(uploaded_file.name) > 23 else uploaded_file.name
+                st.success(f"✅ {short_name}")
 
         # Index documents if there are new files
         if new_files:
-            with st.spinner(f"📚 Indexing {len(new_files)} new documents..."):
+            with st.spinner(f"Indexing {len(new_files)} docs..."):
                 success = st.session_state.agent.load_documents(force_reload=False)
                 if success:
-                    st.success(f"✅ Successfully indexed {len(new_files)} new documents!")
+                    st.success(f"✅ Indexed {len(new_files)} docs!")
                 else:
-                    st.error("❌ Failed to index some documents")
+                    st.error("❌ Indexing failed")
 
         st.session_state.processing_documents = False
 
@@ -157,108 +289,104 @@ with st.sidebar:
         time.sleep(1)
         st.rerun()
 
-    # System Info
+    # System Info - Mobile optimized
     st.markdown("---")
-    st.header("📊 System Status")
+    st.header("📊 Status")
 
+    # Use single column on mobile (handled by CSS)
     col1, col2 = st.columns(2)
     with col1:
-        st.metric("Documents", system_info['documents_loaded'])
+        st.metric("Docs", system_info['documents_loaded'])
     with col2:
-        st.metric("Chat History", system_info['conversation_length'])
+        st.metric("History", system_info['conversation_length'])
 
-    # Index status with more detail
+    # Index status with mobile-friendly display
     if system_info['index_ready']:
-        st.success(f"✅ Index Ready")
-        st.caption(f"📁 {system_info.get('indexed_files_count', 0)} files indexed")
-        st.caption(f"🗄️ {system_info.get('collection_count', 0)} vectors in DB")
+        st.success("✅ Ready")
+        with st.expander("Details"):
+            st.caption(f"📁 {system_info.get('indexed_files_count', 0)} files")
+            st.caption(f"🗄️ {system_info.get('collection_count', 0)} vectors")
     else:
-        st.warning("⚠️ No documents indexed")
-        st.caption("Upload PDFs to enable document search")
+        st.warning("⚠️ No docs")
+        st.caption("Upload PDFs first")
 
-    # Document list
+    # Document list - mobile optimized
     if system_info['document_list']:
-        with st.expander(f"📁 Loaded Documents ({len(system_info['document_list'])})", expanded=False):
+        with st.expander(f"📁 Docs ({len(system_info['document_list'])})", expanded=False):
             for doc in system_info['document_list']:
-                display_name = doc if len(doc) <= 35 else doc[:32] + "..."
+                # Truncate long names for mobile
+                display_name = doc if len(doc) <= 25 else doc[:22] + "..."
                 st.text(f"📄 {display_name}")
 
-    # Tool Status
+    # Tool Status - simplified for mobile
     st.markdown("---")
-    st.header("🛠️ Available Tools")
+    with st.expander("🛠️ Tools", expanded=False):
+        tools_status = {
+            "📚 RAG": "✅" if system_info['index_ready'] else "⚠️",
+            "🌐 Web": "✅",
+            "🤖 AI": "✅",
+            "🗄️ DB": "✅"
+        }
+        
+        # Display in a compact grid
+        cols = st.columns(4)
+        for i, (tool, status) in enumerate(tools_status.items()):
+            with cols[i]:
+                st.write(f"{tool}\n{status}")
 
-    tools_status = {
-        "📚 RAG Search": "✅ Ready" if system_info['index_ready'] else "⚠️ No documents",
-        "🌐 Web Search": "✅ Ready",
-        "🤖 Claude AI": "✅ Connected",
-        "🗄️ Vector DB": "✅ ChromaDB"
-    }
-
-    for tool, status in tools_status.items():
-        st.write(f"{tool}: {status}")
-
-    # Action buttons
+    # Action buttons - mobile friendly
     st.markdown("---")
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("🗑️ Clear Chat", use_container_width=True):
+        if st.button("🗑️ Clear", use_container_width=True, key="clear_btn"):
             st.session_state.messages = []
             st.session_state.agent.clear_conversation()
             st.rerun()
 
     with col2:
-        if st.button("🔄 Re-index All", use_container_width=True):
-            with st.spinner("🔄 Re-indexing all documents..."):
+        if st.button("🔄 Re-index", use_container_width=True, key="reindex_btn"):
+            with st.spinner("Re-indexing..."):
                 success = st.session_state.agent.load_documents(force_reload=True)
                 if success:
-                    st.success("✅ Re-indexed successfully!")
+                    st.success("✅ Done!")
                 else:
-                    st.error("❌ Re-indexing failed")
+                    st.error("❌ Failed")
             time.sleep(1)
             st.rerun()
 
-    # About section
+    # About section - simplified for mobile
     st.markdown("---")
     with st.expander("ℹ️ About", expanded=False):
         st.markdown("""
-        ### Intelligent RAG Assistant
-
-        **Features:**
-        - 📚 **Document RAG**: Query your PDFs
-        - 🌐 **Web Search**: Current information
-        - 🤖 **Claude AI**: Smart responses
-        - 🔄 **Auto-fallback**: Web search when needed
-        - 💾 **Persistent**: Documents stay indexed
-
-        **How it works:**
-        1. Upload PDFs for context
-        2. Ask any question
-        3. Gets answers from docs or web
-
-        **Tips:**
-        - Documents are indexed once and persist
-        - System auto-searches web if needed
-        - Combines sources for best answers
+        **Intelligent RAG Assistant**
+        
+        📚 Search your PDFs  
+        🌐 Web search when needed  
+        🤖 Smart AI responses  
+        💾 Persistent storage  
+        
+        Just upload PDFs and ask!
         """)
 
 # Main chat interface
-st.title("💬 Intelligent Q&A Assistant")
+st.title("💬 Q&A Assistant")
 
-# Add a subtitle with current capabilities
+# Mobile-friendly capability display
 system_info = st.session_state.agent.get_system_info()
 if system_info['index_ready']:
-    st.caption(f"📚 {system_info['documents_loaded']} documents ready | 🌐 Web search enabled | 🤖 Claude AI connected")
+    st.caption(f"📚 {system_info['documents_loaded']} docs | 🌐 Web | 🤖 AI")
 else:
-    st.caption("🌐 Web search enabled | 🤖 Claude AI ready | 📄 Upload PDFs to enable document search")
+    st.caption("🌐 Web | 🤖 AI | 📄 Upload PDFs")
 
 # Display chat messages
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-        # Display metadata for assistant messages
+        # Display metadata for assistant messages - mobile optimized
         if message["role"] == "assistant":
-            metadata_cols = st.columns(4)
+            # Use 2 columns on mobile, 4 on desktop (CSS handles this)
+            metadata_cols = st.columns([2, 2, 2, 2])
 
             with metadata_cols[0]:
                 if "tool_used" in message:
@@ -269,17 +397,17 @@ for message in st.session_state.messages:
                         "rag_search + web_search": "📚🌐",
                         "combined": "📚🌐"
                     }.get(message['tool_used'], "🛠️")
-                    st.caption(f"{tool_emoji} {message['tool_used']}")
+                    st.caption(f"{tool_emoji}")
 
             with metadata_cols[1]:
                 if "confidence" in message:
                     confidence = message.get('confidence', 0)
                     if confidence >= 0.8:
-                        st.caption(f"✅ High: {confidence:.0%}")
+                        st.caption(f"✅ {confidence:.0%}")
                     elif confidence >= 0.6:
-                        st.caption(f"📊 Medium: {confidence:.0%}")
+                        st.caption(f"📊 {confidence:.0%}")
                     else:
-                        st.caption(f"⚠️ Low: {confidence:.0%}")
+                        st.caption(f"⚠️ {confidence:.0%}")
 
             with metadata_cols[2]:
                 if "timestamp" in message:
@@ -287,18 +415,22 @@ for message in st.session_state.messages:
 
             with metadata_cols[3]:
                 if "sources" in message and message["sources"]:
-                    with st.popover("📚 Sources"):
+                    with st.popover("📚"):
+                        st.markdown("**Sources:**")
                         for source in message["sources"]:
                             if isinstance(source, str) and source.startswith("http"):
-                                display_text = source[:50] + "..." if len(source) > 50 else source
+                                # Shorten URLs for mobile
+                                display_text = source.split('/')[2] if len(source.split('/')) > 2 else source[:30]
                                 st.markdown(f"🔗 [{display_text}]({source})")
                             else:
-                                st.markdown(f"📄 {source}")
+                                # Shorten document names
+                                display_text = source[:30] + "..." if len(source) > 33 else source
+                                st.markdown(f"📄 {display_text}")
 
 # Chat input
-if prompt := st.chat_input("Ask anything - I'll search documents and the web as needed..."):
+if prompt := st.chat_input("Ask anything..."):
     if st.session_state.processing_documents:
-        st.warning("⏳ Please wait, documents are being indexed...")
+        st.warning("⏳ Indexing in progress...")
     else:
         st.session_state.messages.append({"role": "user", "content": prompt})
 
@@ -309,20 +441,14 @@ if prompt := st.chat_input("Ask anything - I'll search documents and the web as 
             message_placeholder = st.empty()
             metadata_placeholder = st.empty()
 
-            with st.status("🤔 Processing your query...", expanded=True) as status:
-                st.write("🔍 Analyzing query...")
-                if st.session_state.agent.index is not None:
-                    st.write("📚 Searching documents...")
-                st.write("🌐 Determining if web search needed...")
-
+            with st.status("Processing...", expanded=False) as status:
                 response: AgentResponse = st.session_state.agent.process_query(prompt)
-
-                status.update(label="✅ Complete!", state="complete", expanded=False)
+                status.update(label="✅ Done!", state="complete", expanded=False)
 
             message_placeholder.markdown(response.answer)
 
             with metadata_placeholder.container():
-                metadata_cols = st.columns(4)
+                metadata_cols = st.columns([2, 2, 2, 2])
 
                 with metadata_cols[0]:
                     tool_emoji = {
@@ -332,28 +458,30 @@ if prompt := st.chat_input("Ask anything - I'll search documents and the web as 
                         "rag_search + web_search": "📚🌐",
                         "combined": "📚🌐"
                     }.get(response.tool_used, "🛠️")
-                    st.caption(f"{tool_emoji} {response.tool_used}")
+                    st.caption(f"{tool_emoji}")
 
                 with metadata_cols[1]:
                     if response.confidence >= 0.8:
-                        st.caption(f"✅ High: {response.confidence:.0%}")
+                        st.caption(f"✅ {response.confidence:.0%}")
                     elif response.confidence >= 0.6:
-                        st.caption(f"📊 Medium: {response.confidence:.0%}")
+                        st.caption(f"📊 {response.confidence:.0%}")
                     else:
-                        st.caption(f"⚠️ Low: {response.confidence:.0%}")
+                        st.caption(f"⚠️ {response.confidence:.0%}")
 
                 with metadata_cols[2]:
-                    st.caption(f"⏱️ {datetime.now().strftime('%H:%M:%S')}")
+                    st.caption(f"⏱️ {datetime.now().strftime('%H:%M')}")
 
                 with metadata_cols[3]:
                     if response.sources:
-                        with st.popover("📚 Sources"):
+                        with st.popover("📚"):
+                            st.markdown("**Sources:**")
                             for source in response.sources:
                                 if isinstance(source, str) and source.startswith("http"):
-                                    display_text = source[:50] + "..." if len(source) > 50 else source
+                                    display_text = source.split('/')[2] if len(source.split('/')) > 2 else source[:30]
                                     st.markdown(f"🔗 [{display_text}]({source})")
                                 else:
-                                    st.markdown(f"📄 {source}")
+                                    display_text = source[:30] + "..." if len(source) > 33 else source
+                                    st.markdown(f"📄 {display_text}")
 
             st.session_state.messages.append({
                 "role": "assistant",
@@ -361,55 +489,46 @@ if prompt := st.chat_input("Ask anything - I'll search documents and the web as 
                 "sources": response.sources,
                 "tool_used": response.tool_used,
                 "confidence": response.confidence,
-                "timestamp": datetime.now().strftime('%H:%M:%S')
+                "timestamp": datetime.now().strftime('%H:%M')
             })
 
-# Helpful prompts if no messages
+# Helpful prompts if no messages - mobile optimized
 if not st.session_state.messages:
     st.markdown("---")
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        st.markdown("### 📚 Document Questions")
+    
+    # Stack vertically on mobile
+    st.markdown("### 💡 Try asking:")
+    
+    tab1, tab2, tab3 = st.tabs(["📚 Documents", "🌐 Web", "🧠 General"])
+    
+    with tab1:
         st.markdown("""
-        *After uploading PDFs:*
-        - "Summarize the main points"
-        - "What does it say about [topic]?"
-        - "Find information about [term]"
+        - Summarize the main points
+        - What does it say about X?
+        - Find info about Y
         """)
 
-    with col2:
-        st.markdown("### 🌐 Web Search")
+    with tab2:
         st.markdown("""
-        *Current information:*
-        - "Latest news about AI"
-        - "Current trends in technology"
-        - "Recent developments in [topic]"
+        - Latest news about AI
+        - Current tech trends
+        - Recent developments
         """)
 
-    with col3:
-        st.markdown("### 🧠 General Knowledge")
+    with tab3:
         st.markdown("""
-        *Any topic:*
-        - "Explain quantum computing"
-        - "How does machine learning work?"
-        - "Best practices for [topic]"
+        - Explain quantum computing
+        - How does ML work?
+        - Best practices for X
         """)
 
-    st.info("""
-    💡 **Pro tip:** The assistant automatically determines the best source for your answer:
-    - Documents first (if relevant PDFs are uploaded)
-    - Web search for current/missing information
-    - General knowledge for established facts
+    st.info("💡 I automatically choose the best source for your answer!")
 
-    Your documents are indexed once and persist between sessions!
-    """)
-
-# Footer
+# Mobile-friendly footer
 st.markdown("---")
 st.markdown("""
-<div style='text-align: center; color: #666;'>
-    <p>Powered by Claude AI 🤖 | Vector Storage by ChromaDB 🗄️ | Web Search by Google 🔎</p>
-    <p>Truly Agentic RAG Assistant v2.1 - Documents persist between sessions!</p>
+<div style='text-align: center; color: #666; font-size: 12px; padding: 10px;'>
+    <p>Powered by Claude AI 🤖 | ChromaDB 🗄️ | Google 🔎</p>
+    <p>Agentic RAG v2.1</p>
 </div>
 """, unsafe_allow_html=True)
