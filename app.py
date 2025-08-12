@@ -16,20 +16,37 @@ import json
 # Load environment variables
 load_dotenv()
 
+# PRAGYA Branding
+PROJECT_NAME = "PRAGYA"
+PROJECT_TAGLINE = "Persistent Retrieval Augmented Generation Your Assistant"
+PROJECT_HINDI = "प्रज्ञा - Your Intelligent Knowledge Companion"
+PROJECT_VERSION = "v2.1"
+DEVELOPER = "Udish Kumar"
+
 # Page configuration
 st.set_page_config(
-    page_title="Agentic RAG Assistant",
-    page_icon="🤖",
+    page_title=f"{PROJECT_NAME} - Intelligent RAG Agent",
+    page_icon="🧘",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Enhanced Mobile-Responsive CSS
+# Enhanced Mobile-Responsive CSS with Fixed Text Colors
 st.markdown("""
 <style>
     /* Base styles */
     .stApp { 
         background-color: #f0f2f6; 
+    }
+    
+    /* Ensure all text is dark/black */
+    .stMarkdown, .stText, p, span, div, label {
+        color: #262730 !important;
+    }
+    
+    /* Headers should be dark */
+    h1, h2, h3, h4, h5, h6 {
+        color: #262730 !important;
     }
     
     /* Chat message styling with mobile responsiveness */
@@ -42,12 +59,19 @@ st.markdown("""
     .user-message { 
         background-color: #e3f2fd; 
         margin-left: 20%; 
+        color: #262730 !important;
     }
     
     .assistant-message { 
         background-color: #ffffff; 
         margin-right: 20%; 
-        border: 1px solid #e0e0e0; 
+        border: 1px solid #e0e0e0;
+        color: #262730 !important;
+    }
+    
+    /* Ensure chat messages have dark text */
+    div[data-testid="stChatMessage"] * {
+        color: #262730 !important;
     }
     
     .source-card { 
@@ -55,14 +79,51 @@ st.markdown("""
         padding: 0.5rem; 
         margin: 0.25rem 0; 
         border-radius: 0.25rem; 
-        font-size: 0.9rem; 
+        font-size: 0.9rem;
+        color: #262730 !important;
     }
     
     .metric-card { 
         background-color: #ffffff; 
         padding: 1rem; 
         border-radius: 0.5rem; 
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1); 
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        color: #262730 !important;
+    }
+    
+    /* Sidebar text should be dark */
+    section[data-testid="stSidebar"] * {
+        color: #262730 !important;
+    }
+    
+    /* Metrics text */
+    div[data-testid="metric-container"] * {
+        color: #262730 !important;
+    }
+    
+    /* Caption text */
+    .stCaption {
+        color: #555555 !important;
+    }
+    
+    /* Tab text */
+    button[data-baseweb="tab"] {
+        color: #262730 !important;
+    }
+    
+    /* Expander text */
+    details summary {
+        color: #262730 !important;
+    }
+    
+    /* Info/Warning/Success/Error boxes text */
+    .stAlert * {
+        color: #262730 !important;
+    }
+    
+    /* Popover text */
+    div[data-testid="stPopover"] * {
+        color: #262730 !important;
     }
     
     /* Hide the status widget that appears during indexing */
@@ -70,8 +131,22 @@ st.markdown("""
         display: none; 
     }
     
+    /* PRAGYA branding colors */
+    .pragya-header {
+        background: linear-gradient(90deg, #ff9933, #ffffff, #138808);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+        font-weight: bold;
+    }
+    
     /* Mobile-specific styles */
     @media (max-width: 768px) {
+        /* Ensure mobile text is dark */
+        * {
+            color: #262730 !important;
+        }
+        
         /* Adjust chat message margins for mobile */
         .user-message { 
             margin-left: 5%; 
@@ -88,6 +163,11 @@ st.markdown("""
             padding: 1rem 0.5rem;
         }
         
+        /* Ensure sidebar text is visible on mobile */
+        section[data-testid="stSidebar"] * {
+            color: #262730 !important;
+        }
+        
         /* Adjust columns for mobile */
         div[data-testid="column"] {
             width: 100% !important;
@@ -99,9 +179,10 @@ st.markdown("""
             padding: 0.5rem;
         }
         
-        /* Smaller fonts for mobile */
+        /* Smaller fonts for mobile but keep dark */
         .stMarkdown {
             font-size: 14px;
+            color: #262730 !important;
         }
         
         /* Make buttons full width on mobile */
@@ -140,6 +221,11 @@ st.markdown("""
         div[data-testid="stPopover"] {
             max-width: 90vw;
         }
+        
+        /* Ensure all mobile text stays dark */
+        p, span, div, label, h1, h2, h3, h4, h5, h6 {
+            color: #262730 !important;
+        }
     }
     
     /* Tablet-specific adjustments */
@@ -150,6 +236,11 @@ st.markdown("""
         
         .assistant-message { 
             margin-right: 10%; 
+        }
+        
+        /* Ensure tablet text is dark */
+        * {
+            color: #262730 !important;
         }
     }
     
@@ -163,6 +254,16 @@ st.markdown("""
     * {
         -webkit-overflow-scrolling: touch;
     }
+    
+    /* Links should be visible */
+    a {
+        color: #0066cc !important;
+        text-decoration: none;
+    }
+    
+    a:hover {
+        text-decoration: underline;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -174,7 +275,7 @@ if 'agent' not in st.session_state:
         st.info("Get your API key from: https://console.anthropic.com")
         st.stop()
 
-    with st.spinner("🚀 Initializing RAG system..."):
+    with st.spinner(f"🕉️ Initializing {PROJECT_NAME}..."):
         st.session_state.agent = AgenticRAG(
             anthropic_api_key=api_key,
             vector_store_path=os.getenv('VECTOR_STORE_PATH', './data/vector_store'),
@@ -216,7 +317,9 @@ def get_files_hash(files):
 
 # Sidebar
 with st.sidebar:
-    st.title("🤖 RAG Assistant")
+    # PRAGYA Branding
+    st.markdown(f"# 🧘 {PROJECT_NAME}")
+    st.caption(PROJECT_HINDI)
     st.markdown("---")
 
     # File upload section
@@ -354,29 +457,36 @@ with st.sidebar:
             time.sleep(1)
             st.rerun()
 
-    # About section - simplified for mobile
+    # About section - Updated for PRAGYA
     st.markdown("---")
-    with st.expander("ℹ️ About", expanded=False):
-        st.markdown("""
-        **Intelligent RAG Assistant**
+    with st.expander("ℹ️ About PRAGYA", expanded=False):
+        st.markdown(f"""
+        **{PROJECT_NAME}** - प्रज्ञा  
+        *{PROJECT_TAGLINE}*
         
-        📚 Search your PDFs  
-        🌐 Web search when needed  
-        🤖 Smart AI responses  
-        💾 Persistent storage  
+        **Meaning:** Wisdom, Intelligence, Understanding  
         
-        Just upload PDFs and ask!
+        **Features:**  
+        📚 Document RAG - Search your PDFs  
+        🌐 Web Search - Current information  
+        🤖 Claude AI - Intelligent responses  
+        🔄 Auto-routing - Best source selection  
+        💾 Persistent - Knowledge preserved  
+        
+        **Developer:** {DEVELOPER}  
+        **Version:** {PROJECT_VERSION}
         """)
 
 # Main chat interface
-st.title("💬 Q&A Assistant")
+st.markdown(f"# 🧘 {PROJECT_NAME}")
+st.caption(f"*{PROJECT_TAGLINE}*")
 
 # Mobile-friendly capability display
 system_info = st.session_state.agent.get_system_info()
 if system_info['index_ready']:
-    st.caption(f"📚 {system_info['documents_loaded']} docs | 🌐 Web | 🤖 AI")
+    st.caption(f"📚 {system_info['documents_loaded']} docs | 🌐 Web | 🤖 AI | 💡 Wisdom Mode Active")
 else:
-    st.caption("🌐 Web | 🤖 AI | 📄 Upload PDFs")
+    st.caption("🌐 Web | 🤖 AI | 📄 Upload PDFs to unlock full wisdom")
 
 # Display chat messages
 for message in st.session_state.messages:
@@ -427,8 +537,8 @@ for message in st.session_state.messages:
                                 display_text = source[:30] + "..." if len(source) > 33 else source
                                 st.markdown(f"📄 {display_text}")
 
-# Chat input
-if prompt := st.chat_input("Ask anything..."):
+# Chat input with PRAGYA branding
+if prompt := st.chat_input(f"Ask {PROJECT_NAME} anything... (प्रज्ञा से कुछ भी पूछें)"):
     if st.session_state.processing_documents:
         st.warning("⏳ Indexing in progress...")
     else:
@@ -441,9 +551,9 @@ if prompt := st.chat_input("Ask anything..."):
             message_placeholder = st.empty()
             metadata_placeholder = st.empty()
 
-            with st.status("Processing...", expanded=False) as status:
+            with st.status(f"🧘 {PROJECT_NAME} is thinking...", expanded=False) as status:
                 response: AgentResponse = st.session_state.agent.process_query(prompt)
-                status.update(label="✅ Done!", state="complete", expanded=False)
+                status.update(label="✅ Wisdom delivered!", state="complete", expanded=False)
 
             message_placeholder.markdown(response.answer)
 
@@ -497,7 +607,7 @@ if not st.session_state.messages:
     st.markdown("---")
     
     # Stack vertically on mobile
-    st.markdown("### 💡 Try asking:")
+    st.markdown(f"### 💡 Ask {PROJECT_NAME}:")
     
     tab1, tab2, tab3 = st.tabs(["📚 Documents", "🌐 Web", "🧠 General"])
     
@@ -522,13 +632,15 @@ if not st.session_state.messages:
         - Best practices for X
         """)
 
-    st.info("💡 I automatically choose the best source for your answer!")
+    st.info(f"💡 {PROJECT_NAME} (प्रज्ञा) automatically chooses the best source for your answer - combining ancient wisdom with modern AI!")
 
-# Mobile-friendly footer
+# Mobile-friendly footer with PRAGYA branding
 st.markdown("---")
-st.markdown("""
-<div style='text-align: center; color: #666; font-size: 12px; padding: 10px;'>
-    <p>Powered by Claude AI 🤖 | ChromaDB 🗄️ | Google 🔎</p>
-    <p>Agentic RAG v2.1</p>
+st.markdown(f"""
+<div style='text-align: center; color: #262730; font-size: 12px; padding: 10px;'>
+    <p><strong>{PROJECT_NAME}</strong> - {PROJECT_HINDI}</p>
+    <p style='color: #555555;'>Powered by Claude AI 🤖 | ChromaDB 🗄️ | Google 🔎</p>
+    <p style='color: #555555;'>Developed with ❤️ by {DEVELOPER} | {PROJECT_VERSION}</p>
+    <p style='color: #777777; font-size: 10px;'><em>"{PROJECT_TAGLINE}"</em></p>
 </div>
 """, unsafe_allow_html=True)
