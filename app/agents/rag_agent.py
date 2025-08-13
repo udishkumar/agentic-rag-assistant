@@ -1,7 +1,7 @@
 # app/agents/rag_agent.py
 import os
 from typing import List, Dict, Any, Optional, Tuple
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 import re
 import anthropic
 from llama_index.core import (
@@ -23,6 +23,9 @@ import time
 import hashlib
 import requests
 import torch
+import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import numpy as np
 
 # --- Safe defaults for backends (helps on Apple Silicon / fresh Torch installs) ---
 os.environ.setdefault("CUDA_VISIBLE_DEVICES", "")          # disable CUDA if present
@@ -43,6 +46,139 @@ class AgentResponse:
     metadata: Dict[str, Any]
 
 
+@dataclass
+class Conversation:
+    """Structure for a conversation session"""
+    id: str
+    title: str
+    created_at: str
+    updated_at: str
+    messages: List[Dict[str, Any]]
+    metadata: Dict[str, Any]
+
+
+class ConversationManager:
+    """Manages persistent conversation storage and retrieval"""
+    
+    def __init__(self, storage_path: str = "./data/conversations"):
+        self.storage_path = storage_path
+        os.makedirs(storage_path, exist_ok=True)
+        self.index_file = os.path.join(storage_path, "conversations_index.json")
+        self.conversations_index = self._load_index()
+        
+    def _load_index(self) -> Dict[str, Dict[str, Any]]:
+        """Load conversation index from disk"""
+        if os.path.exists(self.index_file):
+            try:
+                with open(self.index_file, 'r') as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.error(f"Error loading conversation index: {e}")
+        return {}
+    
+    def _save_index(self):
+        """Save conversation index to disk"""
+        try:
+            with open(self.index_file, 'w') as f:
+                json.dump(self.conversations_index, f, indent=2)
+        except Exception as e:
+            logger.error(f"Error saving conversation index: {e}")
+    
+    def create_conversation(self, title: str = None) -> Conversation:
+        """Create a new conversation"""
+        conv_id = str(uuid.uuid4())
+        now = datetime.now().isoformat()
+        
+        if not title:
+            title = f"Conversation {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        
+        conversation = Conversation(
+            id=conv_id,
+            title=title,
+            created_at=now,
+            updated_at=now,
+            messages=[],
+            metadata={}
+        )
+        
+        # Update index
+        self.conversations_index[conv_id] = {
+            "title": title,
+            "created_at": now,
+            "updated_at": now,
+            "message_count": 0
+        }
+        
+        self._save_index()
+        self.save_conversation(conversation)
+        
+        return conversation
+    
+    def save_conversation(self, conversation: Conversation):
+        """Save a conversation to disk"""
+        conv_file = os.path.join(self.storage_path, f"{conversation.id}.json")
+        try:
+            with open(conv_file, 'w') as f:
+                json.dump(asdict(conversation), f, indent=2)
+            
+            # Update index
+            self.conversations_index[conversation.id] = {
+                "title": conversation.title,
+                "created_at": conversation.created_at,
+                "updated_at": conversation.updated_at,
+                "message_count": len(conversation.messages)
+            }
+            self._save_index()
+        except Exception as e:
+            logger.error(f"Error saving conversation {conversation.id}: {e}")
+    
+    def load_conversation(self, conv_id: str) -> Optional[Conversation]:
+        """Load a conversation from disk"""
+        conv_file = os.path.join(self.storage_path, f"{conv_id}.json")
+        if os.path.exists(conv_file):
+            try:
+                with open(conv_file, 'r') as f:
+                    data = json.load(f)
+                return Conversation(**data)
+            except Exception as e:
+                logger.error(f"Error loading conversation {conv_id}: {e}")
+        return None
+    
+    def delete_conversation(self, conv_id: str) -> bool:
+        """Delete a conversation"""
+        conv_file = os.path.join(self.storage_path, f"{conv_id}.json")
+        try:
+            if os.path.exists(conv_file):
+                os.remove(conv_file)
+            if conv_id in self.conversations_index:
+                del self.conversations_index[conv_id]
+            self._save_index()
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting conversation {conv_id}: {e}")
+            return False
+    
+    def list_conversations(self) -> List[Dict[str, Any]]:
+        """List all conversations sorted by updated_at"""
+        conversations = []
+        for conv_id, info in self.conversations_index.items():
+            conv_info = info.copy()
+            conv_info['id'] = conv_id
+            conversations.append(conv_info)
+        
+        # Sort by updated_at descending
+        conversations.sort(key=lambda x: x.get('updated_at', ''), reverse=True)
+        return conversations
+    
+    def update_conversation_title(self, conv_id: str, new_title: str):
+        """Update conversation title"""
+        conversation = self.load_conversation(conv_id)
+        if conversation:
+            conversation.title = new_title
+            conversation.updated_at = datetime.now().isoformat()
+            self.save_conversation(conversation)
+
+
 class AgenticRAG:
     """Enhanced RAG system with agentic routing and persistent storage"""
 
@@ -51,6 +187,7 @@ class AgenticRAG:
         anthropic_api_key: str,
         vector_store_path: str = "./data/vector_store",
         upload_path: str = "./data/uploads",
+        conversations_path: str = "./data/conversations",
     ):
         # Initialize Anthropic client
         self.anthropic_client = anthropic.Anthropic(api_key=anthropic_api_key)
@@ -63,23 +200,28 @@ class AgenticRAG:
         os.makedirs(self.vector_store_path, exist_ok=True)
         os.makedirs(self.upload_path, exist_ok=True)
 
-        # Initialize embedding model (force CPU; avoid meta tensors/device_map sharding)
+        # Initialize conversation manager
+        self.conversation_manager = ConversationManager(conversations_path)
+        self.current_conversation: Optional[Conversation] = None
+
+        # Initialize embedding model with optimizations
         self.embed_model = HuggingFaceEmbedding(
             model_name="sentence-transformers/all-MiniLM-L6-v2",
-            device="cpu",
-            embed_batch_size=32,
+            device="cuda" if torch.cuda.is_available() else "cpu",
+            embed_batch_size=128,  # Increased batch size for faster processing
+            max_length=256,  # Limit max length for faster processing
             model_kwargs={
-                "low_cpu_mem_usage": False,   # disable meta-init path
-                "device_map": None,           # no accelerate sharding
-                "torch_dtype": torch.float32, # stable on CPU
+                "low_cpu_mem_usage": False,
+                "device_map": None,
+                "torch_dtype": torch.float16 if torch.cuda.is_available() else torch.float32,
             },
         )
 
-        # Configure LlamaIndex to NOT use an internal LLM
+        # Configure LlamaIndex with optimized settings
         LlamaSettings.embed_model = self.embed_model
         LlamaSettings.llm = None
-        LlamaSettings.chunk_size = 512
-        LlamaSettings.chunk_overlap = 50
+        LlamaSettings.chunk_size = 1024  # Increased chunk size for fewer chunks
+        LlamaSettings.chunk_overlap = 128  # Reasonable overlap
 
         # Initialize ChromaDB for persistent vector storage
         self.chroma_client = chromadb.PersistentClient(
@@ -94,8 +236,7 @@ class AgenticRAG:
         # Initialize or load collection
         self._initialize_collection()
 
-        # Conversation memory + metadata
-        self.conversation_history: List[Dict[str, Any]] = []
+        # Document metadata
         self.document_metadata: Dict[str, Any] = {}
 
         # Index + retrieval
@@ -109,12 +250,12 @@ class AgenticRAG:
         self.metadata_file = os.path.join(self.vector_store_path, "metadata.json")
 
         # ---- IMPROVED Routing knobs ----
-        self.always_enrich_modifications = True  # NEW: Enrich when asking for modifications
-        self.always_enrich_insufficient = True   # NEW: Always enrich when response is insufficient
-        self.enrich_low_relevance_threshold = 0.35  # NEW: Enrich if relevance is below this
+        self.always_enrich_modifications = True
+        self.always_enrich_insufficient = True
+        self.enrich_low_relevance_threshold = 0.35
         self.always_enrich_places = True
         self.always_enrich_open_ended = True
-        self.enrich_length_threshold = 600  # Increased threshold
+        self.enrich_length_threshold = 600
 
         # Load existing metadata
         self._load_metadata()
@@ -129,6 +270,17 @@ class AgenticRAG:
         self._load_existing_index()
 
         logger.info("AgenticRAG initialized successfully with persistent storage")
+
+    def set_current_conversation(self, conversation: Conversation):
+        """Set the current active conversation"""
+        self.current_conversation = conversation
+        logger.info(f"Switched to conversation: {conversation.id}")
+
+    def get_conversation_history(self) -> List[Dict[str, Any]]:
+        """Get current conversation history"""
+        if self.current_conversation:
+            return self.current_conversation.messages
+        return []
 
     def _initialize_collection(self):
         """Initialize or get existing ChromaDB collection"""
@@ -204,8 +356,8 @@ class AgenticRAG:
             self.postprocessor = SimilarityPostprocessor(similarity_cutoff=0.2)
             logger.info("Retriever created successfully")
 
-    def load_documents(self, force_reload: bool = False) -> bool:
-        """Load and index PDF documents with proper persistence"""
+    def load_documents(self, force_reload: bool = False, progress_callback=None) -> bool:
+        """Load and index PDF documents with improved performance"""
         try:
             pdf_files = [f for f in os.listdir(self.upload_path) if f.endswith(".pdf")]
 
@@ -233,21 +385,29 @@ class AgenticRAG:
 
             logger.info(f"Processing {len(new_files)} new PDF files")
 
-            # Load documents
+            # Load documents with progress tracking
             if new_files:
+                if progress_callback:
+                    progress_callback(0, f"Loading {len(new_files)} documents...")
+                    
                 reader = SimpleDirectoryReader(
                     input_files=[os.path.join(self.upload_path, f) for f in new_files],
                     filename_as_id=True,
                 )
                 new_documents = reader.load_data()
+                
                 if not new_documents:
                     logger.warning("No new documents could be loaded")
                     return False
+                    
                 logger.info(f"Loaded {len(new_documents)} new documents")
+                
+                if progress_callback:
+                    progress_callback(20, f"Loaded {len(new_documents)} documents")
             else:
                 new_documents = []
 
-            # Create or update index
+            # Create or update index with batch processing
             if self.index is None or (force_reload and pdf_files):
                 logger.info("Creating new index with ChromaDB backend...")
 
@@ -272,17 +432,25 @@ class AgenticRAG:
                 else:
                     all_documents = new_documents
 
+                if progress_callback:
+                    progress_callback(30, "Creating vector index...")
+
                 vector_store = ChromaVectorStore(chroma_collection=self.collection)
                 self.storage_context = StorageContext.from_defaults(
                     vector_store=vector_store
                 )
 
+                # Use batch processing for faster indexing
                 self.index = VectorStoreIndex.from_documents(
                     all_documents,
                     storage_context=self.storage_context,
                     embed_model=self.embed_model,
                     show_progress=True,
+                    insert_batch_size=32,  # Process in batches
                 )
+
+                if progress_callback:
+                    progress_callback(80, "Finalizing index...")
 
                 for doc in all_documents:
                     md = getattr(doc, "metadata", {}) or {}
@@ -316,9 +484,22 @@ class AgenticRAG:
 
             elif new_documents:
                 logger.info("Adding new documents to existing index...")
-                for doc in new_documents:
-                    self.index.insert(doc)
+                
+                if progress_callback:
+                    progress_callback(30, f"Adding {len(new_documents)} documents to index...")
+                
+                # Batch insert for better performance
+                batch_size = 32
+                for i in range(0, len(new_documents), batch_size):
+                    batch = new_documents[i:i+batch_size]
+                    for doc in batch:
+                        self.index.insert(doc)
+                    
+                    if progress_callback:
+                        progress = 30 + int((i / len(new_documents)) * 50)
+                        progress_callback(progress, f"Indexed {min(i+batch_size, len(new_documents))}/{len(new_documents)} documents")
 
+                for doc in new_documents:
                     md = getattr(doc, "metadata", {}) or {}
                     path = (
                         md.get("file_path")
@@ -348,8 +529,14 @@ class AgenticRAG:
                     self.indexed_files.add(file_hash)
 
             # Save metadata + create retriever
+            if progress_callback:
+                progress_callback(90, "Saving metadata...")
+                
             self._save_metadata()
             self._create_retriever()
+
+            if progress_callback:
+                progress_callback(100, f"Successfully indexed {len(self.indexed_files)} documents")
 
             logger.info(f"Successfully indexed {len(self.indexed_files)} total documents")
             return True
@@ -357,7 +544,6 @@ class AgenticRAG:
         except Exception as e:
             logger.error(f"Error loading documents: {str(e)}")
             import traceback
-
             logger.error(f"Traceback: {traceback.format_exc()}")
             return False
 
@@ -384,14 +570,14 @@ class AgenticRAG:
                 time.sleep(self.search_delay - since)
 
             logger.info(f"Performing Google CSE web search for: {query}")
-            num = min(max_results, 10)  # Google CSE supports up to 10 results per request
+            num = min(max_results, 10)
             params = {
                 "key": self.google_api_key,
                 "cx": self.google_cse_id,
                 "q": query,
                 "num": num,
-                "safe": "active",  # optional
-                "gl": "us",        # optional (geo bias)
+                "safe": "active",
+                "gl": "us",
             }
 
             # Exponential backoff on transient errors
@@ -457,9 +643,7 @@ class AgenticRAG:
             scores = [n.score for n in nodes if n.score is not None]
             avg_score = sum(scores) / len(scores) if scores else 0.0
 
-            # Keep what survived postprocessing; include if score is None
             def _content(n):
-                # LlamaIndex NodeWithScore supports .get_content(); fall back to n.node.text
                 if hasattr(n, "get_content") and callable(getattr(n, "get_content")):
                     return n.get_content() or ""
                 return getattr(n.node, "text", "") or ""
@@ -467,7 +651,6 @@ class AgenticRAG:
             kept = [n for n in nodes if (n.score is None or n.score >= 0.2)]
             combined_text = "\n\n".join([_content(n) for n in kept if _content(n).strip()])
 
-            # Build human-friendly sources with page numbers when available
             srcs: List[str] = []
             for n in kept:
                 md = getattr(n.node, "metadata", {}) or {}
@@ -478,7 +661,7 @@ class AgenticRAG:
                     srcs.append(f"{name} (p.{page})")
                 else:
                     srcs.append(name)
-            # Deduplicate sources preserving order
+            
             seen = set()
             srcs = [s for s in srcs if not (s in seen or seen.add(s))]
 
@@ -492,28 +675,22 @@ class AgenticRAG:
         except Exception as e:
             logger.error(f"Document query error: {str(e)}")
             import traceback
-
             logger.error(f"Traceback: {traceback.format_exc()}")
             return None, 0.0, []
 
-    # ------------------ IMPROVED Heuristics ------------------
-
     def is_response_insufficient(self, response: str) -> bool:
-        """IMPROVED: Check if Claude's response indicates insufficient information."""
+        """Check if Claude's response indicates insufficient information."""
         if not response:
             return True
         rl = response.lower()
         
-        # Expanded list of insufficiency indicators
         kw_hits = any(
             k in rl
             for k in [
-                # Original indicators
                 "not provided in", "not mentioned in", "not available in",
                 "no information about", "cannot find", "unable to answer based on",
                 "outside the scope", "not explicitly stated", "no relevant information",
                 "missing", "unavailable", "unspecified",
-                # NEW indicators found in your transcript
                 "context doesn't provide", "doesn't provide specific",
                 "the context doesn't", "document doesn't",
                 "you would need to", "need to consult", "need to make",
@@ -526,7 +703,6 @@ class AgenticRAG:
             ]
         )
         
-        # Improved regex patterns
         re_hits = bool(
             re.search(r"not\s+(provided|mentioned|available|contained)\s+in\s+the\s+(context|text|document|given)", rl)
             or re.search(r"(context|document|text)\s+(doesn't|does not|didn't)\s+(provide|contain|have|include)", rl)
@@ -538,14 +714,15 @@ class AgenticRAG:
         return kw_hits or re_hits
 
     def _is_modification_query(self, text: str) -> bool:
-        """NEW: Detect queries asking for modifications or variations."""
+        """Detect queries asking for modifications or variations."""
         if not text:
             return False
         t = text.lower()
         
-        # Check conversation context for modification intent
-        if self.conversation_history:
-            # Common modification patterns in follow-ups
+        # Get conversation history from current conversation
+        conversation_history = self.get_conversation_history()
+        
+        if conversation_history:
             modification_phrases = [
                 "make it", "make this", "make that",
                 "change it", "modify it", "adjust it",
@@ -557,7 +734,7 @@ class AgenticRAG:
                 "keto", "vegan", "vegetarian", "gluten-free", "dairy-free",
                 "healthier", "lighter", "richer",
                 "more protein", "less carbs", "low fat",
-                "it's", "its"  # possessive often indicates modification
+                "it's", "its"
             ]
             
             for phrase in modification_phrases:
@@ -591,21 +768,15 @@ class AgenticRAG:
             return False
         t = text.lower().replace("centre", "center")
         place_terms = [
-            # general attractions
             "museum", "science center", "planetarium", "aquarium", "zoo",
             "observatory", "gallery", "exhibition center", "heritage center",
             "landmark", "monument", "memorial",
-            # parks & entertainment
             "park", "theme park", "amusement park", "water park", "garden", "arboretum",
             "stadium", "arena", "theater", "theatre",
-            # markets & shopping
             "market", "night market", "floating market", "shopping mall", "mall",
-            # religious/historic sites
             "temple", "shrine", "church", "cathedral", "mosque", "palace", "fort", "castle",
             "old town", "historic center", "historic centre",
-            # admin/civic
             "city hall",
-            # specific variants for your case
             "science centre for education", "science center for education",
         ]
         if any(term in t for term in place_terms):
@@ -631,42 +802,34 @@ class AgenticRAG:
         return any(p in t for p in ["variants", "other recipes", "more such", "similar ones", "more", "suggest", "alternatives"])
 
     def _should_enrich_with_web(self, q: str, answer: str, doc_relevance: float = 1.0) -> bool:
-        """IMPROVED: Final decision for enrichment with more aggressive triggers."""
-        # Never enrich if user explicitly wants doc-only
+        """Final decision for enrichment with more aggressive triggers."""
         if self._is_doc_only_intent(q):
             return False
             
-        # NEW: Always enrich if doc relevance is low
         if doc_relevance < self.enrich_low_relevance_threshold:
             logger.info(f"Enriching due to low relevance: {doc_relevance:.3f}")
             return True
             
-        # NEW: Always enrich modification queries
         if self.always_enrich_modifications and self._is_modification_query(q):
             logger.info("Enriching modification query")
             return True
             
-        # Always enrich place queries
         if self.always_enrich_places and self._is_place_query(q):
             logger.info("Enriching place query")
             return True
             
-        # NEW: Always enrich if response admits insufficiency
         if self.always_enrich_insufficient and self.is_response_insufficient(answer):
             logger.info("Enriching due to insufficient response")
             return True
             
-        # Always enrich open-ended queries
         if self.always_enrich_open_ended and self._is_open_ended(q):
             logger.info("Enriching open-ended query")
             return True
             
-        # Enrich if response is suspiciously short
         if len(answer or "") < self.enrich_length_threshold:
             logger.info(f"Enriching due to short response: {len(answer)} chars")
             return True
             
-        # NEW: Check for generic/padding language that suggests insufficiency
         generic_indicators = [
             "for more", "consult", "refer to", "check with",
             "you could", "you might", "you may want to",
@@ -679,15 +842,16 @@ class AgenticRAG:
             
         return False
 
-    # ------------------ LLM Orchestration ------------------
-
     def generate_response(self, query: str, context: str, tool_used: str) -> str:
         """Generate response using Claude API"""
         conversation_context = ""
-        if self.conversation_history:
-            recent_history = self.conversation_history[-3:]
+        conversation_history = self.get_conversation_history()
+        
+        if conversation_history:
+            recent_history = conversation_history[-3:]
             for h in recent_history:
-                conversation_context += f"User: {h['user']}\nAssistant: {h['assistant']}\n\n"
+                if 'user' in h and 'assistant' in h:
+                    conversation_context += f"User: {h['user']}\nAssistant: {h['assistant']}\n\n"
 
         if tool_used == "rag_search":
             system_prompt = (
@@ -777,10 +941,13 @@ class AgenticRAG:
         """Agentic processing pipeline with improved enrichment logic"""
         logger.info(f"Processing query: {query}")
 
+        # Get conversation history from current conversation
+        conversation_history = self.get_conversation_history()
+
         # Expand vague follow-ups using prior user turn
         effective_query = query
-        if self._is_vague_followup(query) and self.conversation_history:
-            prev_users = [h.get("user", "") for h in self.conversation_history if "user" in h]
+        if self._is_vague_followup(query) and conversation_history:
+            prev_users = [h.get("user", "") for h in conversation_history if "user" in h]
             if prev_users:
                 prev = prev_users[-1]
                 if prev and prev.strip():
@@ -803,11 +970,9 @@ class AgenticRAG:
             logger.info("Attempting document search...")
             doc_context, doc_relevance, doc_sources = self.query_documents_with_relevance(effective_query)
 
-            if doc_context:  # Even if relevance is low, we got something
-                # Generate initial response from documents
+            if doc_context:
                 initial_response = self.generate_response(query, doc_context, "rag_search")
 
-                # IMPROVED: More aggressive enrichment decision
                 if self._should_enrich_with_web(query, initial_response, doc_relevance):
                     logger.info(f"Enrichment triggered (relevance: {doc_relevance:.3f})")
                     all_contexts.append(f"Document Context:\n{doc_context}")
@@ -815,7 +980,6 @@ class AgenticRAG:
                     tools_used.append("rag_search")
                     force_web = True
                 else:
-                    # Check if query needs current info (unchanged)
                     query_lower = query.lower()
                     needs_current_info = any(
                         word in query_lower
@@ -828,9 +992,22 @@ class AgenticRAG:
                         tools_used.append("rag_search")
                         force_web = True
                     else:
-                        # Only return doc-only response if we're confident it's sufficient
                         if doc_relevance > 0.5 and not self.is_response_insufficient(initial_response):
                             logger.info("Document search provided sufficient answer (no enrichment).")
+                            
+                            # Save to conversation
+                            if self.current_conversation:
+                                self.current_conversation.messages.append({
+                                    "user": query,
+                                    "assistant": initial_response,
+                                    "timestamp": datetime.now().isoformat(),
+                                    "tool_used": "rag_search",
+                                    "sources": doc_sources,
+                                    "confidence": max(doc_relevance, 0.7)
+                                })
+                                self.current_conversation.updated_at = datetime.now().isoformat()
+                                self.conversation_manager.save_conversation(self.current_conversation)
+                            
                             return AgentResponse(
                                 answer=initial_response,
                                 sources=doc_sources,
@@ -843,7 +1020,6 @@ class AgenticRAG:
                                 },
                             )
                         else:
-                            # Low confidence or insufficient - force web enrichment
                             logger.info(f"Low confidence ({doc_relevance:.3f}) or insufficient response - forcing web enrichment")
                             all_contexts.append(f"Document Context:\n{doc_context}")
                             all_sources.extend(doc_sources)
@@ -906,12 +1082,18 @@ class AgenticRAG:
         if self.is_response_insufficient(final_response):
             confidence = min(confidence, 0.55)
 
-        # Store in conversation history
-        self.conversation_history.append(
-            {"user": query, "assistant": final_response, "timestamp": datetime.now().isoformat()}
-        )
-        if len(self.conversation_history) > 10:
-            self.conversation_history = self.conversation_history[-10:]
+        # Store in conversation
+        if self.current_conversation:
+            self.current_conversation.messages.append({
+                "user": query,
+                "assistant": final_response,
+                "timestamp": datetime.now().isoformat(),
+                "tool_used": " + ".join(tools_used) if tools_used else tool_description,
+                "sources": all_sources,
+                "confidence": confidence
+            })
+            self.current_conversation.updated_at = datetime.now().isoformat()
+            self.conversation_manager.save_conversation(self.current_conversation)
 
         return AgentResponse(
             answer=final_response,
@@ -928,19 +1110,25 @@ class AgenticRAG:
         )
 
     def clear_conversation(self):
-        """Clear conversation history"""
-        self.conversation_history = []
+        """Clear current conversation"""
+        if self.current_conversation:
+            self.current_conversation.messages = []
+            self.current_conversation.updated_at = datetime.now().isoformat()
+            self.conversation_manager.save_conversation(self.current_conversation)
         logger.info("Conversation history cleared")
 
     def get_system_info(self) -> Dict[str, Any]:
         """Get system information and statistics"""
+        conversation_count = len(self.get_conversation_history()) if self.current_conversation else 0
+        
         return {
             "documents_loaded": len(self.document_metadata),
             "document_list": list(self.document_metadata.keys()),
-            "conversation_length": len(self.conversation_history),
+            "conversation_length": conversation_count,
             "index_ready": self.index is not None and self.retriever is not None,
             "vector_store": "ChromaDB (Persistent)",
-            "last_query": self.conversation_history[-1] if self.conversation_history else None,
+            "last_query": self.current_conversation.messages[-1] if self.current_conversation and self.current_conversation.messages else None,
             "indexed_files_count": len(self.indexed_files),
             "collection_count": self.collection.count() if self.collection else 0,
+            "current_conversation_id": self.current_conversation.id if self.current_conversation else None,
         }

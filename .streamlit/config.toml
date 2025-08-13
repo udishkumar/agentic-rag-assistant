@@ -6,8 +6,8 @@
 primaryColor = "#FF9933"
 
 # Background colors - Clean white theme
-backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F0F2F6"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f0eee6"
 
 # Text color - Dark for readability
 textColor = "#262730"
