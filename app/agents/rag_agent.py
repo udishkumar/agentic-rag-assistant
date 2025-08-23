@@ -842,7 +842,7 @@ class AgenticRAG:
             
         return False
 
-    def generate_response(self, query: str, context: str, tool_used: str) -> str:
+    # def generate_response(self, query: str, context: str, tool_used: str) -> str:
         """Generate response using Claude API"""
         conversation_context = ""
         conversation_history = self.get_conversation_history()
@@ -936,6 +936,156 @@ class AgenticRAG:
         except Exception as e:
             logger.error(f"Claude API error: {str(e)}")
             return f"I encountered an error generating a response: {str(e)}"
+
+    # Add this updated generate_response method to your rag_agent.py file
+# Replace the existing generate_response method with this one
+
+    def generate_response(self, query: str, context: str, tool_used: str) -> str:
+        """Generate response using Claude API with enhanced error handling"""
+        conversation_context = ""
+        conversation_history = self.get_conversation_history()
+        
+        if conversation_history:
+            recent_history = conversation_history[-3:]
+            for h in recent_history:
+                if 'user' in h and 'assistant' in h:
+                    conversation_context += f"User: {h['user']}\nAssistant: {h['assistant']}\n\n"
+
+        if tool_used == "rag_search":
+            system_prompt = (
+                "You are an intelligent assistant that answers questions based on provided document context. "
+                "Use the context verbatim when possible. If the context doesn't fully answer, say what's missing. "
+                "Be honest about limitations - if information is incomplete, say so clearly."
+            )
+            user_prompt = (
+                f"Based on the following context from the documents, answer this question: {query}\n\n"
+                f"Document Context:\n{context}\n\n"
+                f"Previous conversation:\n{conversation_context}"
+            )
+        elif tool_used == "web_search":
+            system_prompt = (
+                "You are an intelligent assistant that answers questions using web search results.\n"
+                "You HAVE been provided search results; do not claim you cannot search the web.\n"
+                "If results are sparse, say what's missing, and still give best-effort guidance."
+            )
+            user_prompt = (
+                f"Based on the following web search results, answer this question: {query}\n\n"
+                f"Search Results:\n{context}\n\n"
+                f"Previous conversation:\n{conversation_context}"
+            )
+        elif tool_used == "combined":
+            system_prompt = (
+                "You are an intelligent assistant that combines information from documents and web search.\n"
+                "You HAVE been provided both; do not claim you cannot search the web.\n"
+                "Synthesize information from both sources to provide the most complete answer.\n"
+                "Clearly indicate which information comes from documents vs web when appropriate."
+            )
+            user_prompt = (
+                f"Answer this question using both document context and web search results: {query}\n\n"
+                f"Available Information:\n{context}\n\n"
+                f"Previous conversation:\n{conversation_context}"
+            )
+        else:
+            system_prompt = "You are an intelligent, helpful assistant with broad knowledge."
+            user_prompt = (
+                f"Answer this question to the best of your ability: {query}\n\n"
+                f"Previous conversation:\n{conversation_context}"
+            )
+
+        try:
+            logger.info(f"Generating response with Claude API (tool: {tool_used})")
+            response = self.anthropic_client.messages.create(
+                model="claude-3-5-sonnet-20240620",
+                max_tokens=2048,
+                temperature=0.7,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
+            )
+
+            if hasattr(response, "content"):
+                if isinstance(response.content, list) and len(response.content) > 0:
+                    return response.content[0].text
+                elif isinstance(response.content, str):
+                    return response.content
+
+            return str(response)
+
+        except anthropic.AuthenticationError as e:
+            logger.error(f"Authentication error: {str(e)}")
+            error_msg = (
+                "🔐 **Authentication Error**\n\n"
+                "Your API key appears to be invalid or has been revoked. "
+                "Please check your API key and try again.\n\n"
+                "To update your API key, click the 'Change API Key' button in the sidebar."
+            )
+            return error_msg
+        
+        except anthropic.PermissionDeniedError as e:
+            logger.error(f"Permission denied: {str(e)}")
+            return (
+                "🚫 **Permission Denied**\n\n"
+                "Your API key doesn't have permission to use this model. "
+                "Please check your Anthropic account settings."
+            )
+        
+        except anthropic.RateLimitError as e:
+            logger.error(f"Rate limit exceeded: {str(e)}")
+            return (
+                "⏱️ **Rate Limit Exceeded**\n\n"
+                "You've hit your API rate limit. Please wait a few minutes before trying again, "
+                "or check your usage limits at console.anthropic.com"
+            )
+        
+        except anthropic.NotFoundError as e:
+            logger.error(f"Claude model not found: {str(e)}")
+            # Try fallback to Haiku
+            try:
+                response = self.anthropic_client.messages.create(
+                    model="claude-3-haiku-20240307",
+                    max_tokens=2048,
+                    temperature=0.7,
+                    system=system_prompt,
+                    messages=[{"role": "user", "content": user_prompt}],
+                )
+                if hasattr(response, "content"):
+                    if isinstance(response.content, list) and len(response.content) > 0:
+                        return response.content[0].text
+                return str(response)
+            except anthropic.AuthenticationError:
+                return (
+                    "🔐 **Authentication Error**\n\n"
+                    "Your API key is invalid. Please update it in the sidebar."
+                )
+            except Exception as e2:
+                logger.error(f"Fallback model also failed: {str(e2)}")
+                return (
+                    "❌ **Model Error**\n\n"
+                    f"Failed to access Claude models. Error: {str(e2)}"
+                )
+        
+        except anthropic.APIConnectionError as e:
+            logger.error(f"Connection error: {str(e)}")
+            return (
+                "🌐 **Connection Error**\n\n"
+                "Unable to connect to Claude API. Please check your internet connection "
+                "and try again."
+            )
+        
+        except anthropic.APIStatusError as e:
+            logger.error(f"API status error: {str(e)}")
+            return (
+                "⚠️ **API Error**\n\n"
+                f"Claude API returned an error: {str(e)}\n"
+                "Please try again later."
+            )
+        
+        except Exception as e:
+            logger.error(f"Unexpected error: {str(e)}")
+            return (
+                "❌ **Unexpected Error**\n\n"
+                f"An unexpected error occurred: {str(e)}\n"
+                "Please try again or contact support if the issue persists."
+            )
 
     def process_query(self, query: str) -> AgentResponse:
         """Agentic processing pipeline with improved enrichment logic"""

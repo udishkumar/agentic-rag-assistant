@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 import hashlib
 from datetime import datetime
+import anthropic
 
 # Add app directory to path
 sys.path.append(str(Path(__file__).parent))
@@ -13,7 +14,7 @@ sys.path.append(str(Path(__file__).parent))
 from app.agents.rag_agent import AgenticRAG, AgentResponse
 import json
 
-# Load environment variables
+# Load environment variables (but not API key)
 load_dotenv()
 
 # PRAGYA Branding with India Flag Colors (Sharp & Clear)
@@ -143,6 +144,37 @@ st.markdown("""
         letter-spacing: 0.5px;
     }
     
+    /* API Key Container */
+    .api-key-container {
+        background: linear-gradient(135deg, #fff9f4 0%, #ffffff 50%, #f4fff4 100%);
+        border-radius: 15px;
+        padding: 25px;
+        margin: 20px auto;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        border: 2px solid transparent;
+        border-image: linear-gradient(90deg, #FF9933, #FFFFFF, #138808) 1;
+        max-width: 600px;
+    }
+    
+    .api-key-header {
+        text-align: center;
+        font-size: 1.8em;
+        font-weight: 700;
+        margin-bottom: 20px;
+        background: linear-gradient(90deg, #FF9933, #138808);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+    
+    .security-notice {
+        background: #f0f9ff;
+        border-left: 4px solid #0ea5e9;
+        padding: 12px;
+        margin: 15px 0;
+        border-radius: 8px;
+        font-size: 0.9em;
+    }
+    
     /* Enhanced Card Design */
     .metric-card {
         background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
@@ -234,14 +266,6 @@ st.markdown("""
     .stButton > button:hover {
         transform: translateY(-1px);
         box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-    }
-    
-    /* Primary Action Buttons */
-    div[data-testid="column"]:has(button:contains("New Chat")) button,
-    div[data-testid="column"]:has(button:contains("History")) button {
-        background: linear-gradient(135deg, #FF9933 0%, #ff8000 100%);
-        color: white;
-        border: none;
     }
     
     /* Tool Status Grid */
@@ -337,12 +361,6 @@ st.markdown("""
         box-shadow: 0 0 0 3px rgba(255, 153, 51, 0.1);
     }
     
-    /* Tooltip Enhancement */
-    [data-baseweb="tooltip"] {
-        border-radius: 8px;
-        background: #1f2937;
-    }
-    
     /* Hide Streamlit Branding */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
@@ -374,54 +392,285 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# Helper Functions
+def validate_api_key(api_key: str) -> bool:
+    """Validate the format of Claude API key"""
+    if not api_key:
+        return False
+    # Claude API keys typically start with 'sk-ant-'
+    if api_key.startswith('sk-ant-') and len(api_key) > 20:
+        return True
+    return False
+
+def test_api_key(api_key: str) -> tuple[bool, str]:
+    """Test if the API key is valid by making a minimal API call"""
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        # Make a minimal API call to test the key
+        response = client.messages.create(
+            model="claude-3-haiku-20240307",  # Use cheapest model for testing
+            max_tokens=10,
+            messages=[{"role": "user", "content": "Hi"}]
+        )
+        return True, "Valid"
+    except anthropic.AuthenticationError:
+        return False, "Invalid API key. Please check your key and try again."
+    except anthropic.PermissionDeniedError:
+        return False, "API key lacks necessary permissions."
+    except anthropic.RateLimitError:
+        return False, "Rate limit exceeded. Please try again later."
+    except anthropic.APIError as e:
+        return False, f"API error: {str(e)}"
+    except Exception as e:
+        return False, f"Unexpected error: {str(e)}"
+
+def init_agent_with_key(api_key: str):
+    """Initialize the agent with provided API key"""
+    try:
+        agent = AgenticRAG(
+            anthropic_api_key=api_key,
+            vector_store_path=os.getenv('VECTOR_STORE_PATH', './data/vector_store'),
+            upload_path=os.getenv('UPLOAD_PATH', './data/uploads'),
+            conversations_path=os.getenv('CONVERSATIONS_PATH', './data/conversations')
+        )
+        
+        # Check if there are existing documents to load
+        upload_path = os.getenv('UPLOAD_PATH', './data/uploads')
+        if os.path.exists(upload_path):
+            pdf_files = [f for f in os.listdir(upload_path) if f.endswith('.pdf')]
+            if pdf_files:
+                with st.spinner(f"📚 Loading {len(pdf_files)} existing documents..."):
+                    success = agent.load_documents()
+                    if success:
+                        st.success(f"✅ Loaded {len(pdf_files)} documents")
+        
+        # Initialize or load conversation
+        conversations = agent.conversation_manager.list_conversations()
+        if conversations:
+            latest_conv = agent.conversation_manager.load_conversation(conversations[0]['id'])
+            agent.set_current_conversation(latest_conv)
+        else:
+            new_conv = agent.conversation_manager.create_conversation()
+            agent.set_current_conversation(new_conv)
+        
+        return agent
+    except Exception as e:
+        # More specific error handling
+        error_msg = str(e)
+        if "authentication" in error_msg.lower() or "api key" in error_msg.lower():
+            st.error("❌ Authentication failed. Please check your API key.")
+        elif "rate limit" in error_msg.lower():
+            st.error("⏱️ Rate limit exceeded. Please wait a moment and try again.")
+        else:
+            st.error(f"Failed to initialize: {error_msg}")
+        return None
+
+def get_files_hash(files):
+    """Create a hash of uploaded files to detect changes"""
+    if not files:
+        return None
+    hash_obj = hashlib.md5()
+    for file in files:
+        hash_obj.update(file.name.encode())
+        hash_obj.update(str(file.size).encode())
+    return hash_obj.hexdigest()
+
+def switch_conversation(conv_id):
+    """Switch to a different conversation"""
+    conversation = st.session_state.agent.conversation_manager.load_conversation(conv_id)
+    if conversation:
+        st.session_state.agent.set_current_conversation(conversation)
+        st.session_state.current_conversation_id = conv_id
+        st.session_state.messages = conversation.messages
+        st.rerun()
+
+def create_new_conversation():
+    """Create a new conversation"""
+    new_conv = st.session_state.agent.conversation_manager.create_conversation()
+    st.session_state.agent.set_current_conversation(new_conv)
+    st.session_state.current_conversation_id = new_conv.id
+    st.session_state.messages = []
+    st.rerun()
+
+def delete_conversation(conv_id):
+    """Delete a conversation"""
+    if conv_id == st.session_state.current_conversation_id:
+        create_new_conversation()
+    else:
+        st.session_state.agent.conversation_manager.delete_conversation(conv_id)
+        st.rerun()
+
 # Initialize session state
-if 'agent' not in st.session_state:
-    api_key = os.getenv('ANTHROPIC_API_KEY')
-    if not api_key or api_key == 'your_actual_claude_api_key_here':
-        st.error("⚠️ Please add your ANTHROPIC_API_KEY to the .env file!")
-        st.info("Get your API key from: https://console.anthropic.com")
-        st.stop()
+if 'api_key_provided' not in st.session_state:
+    st.session_state.api_key_provided = False
 
-    with st.spinner(f"🕉️ Initializing {PROJECT_NAME}..."):
-        try:
-            st.session_state.agent = AgenticRAG(
-                anthropic_api_key=api_key,
-                vector_store_path=os.getenv('VECTOR_STORE_PATH', './data/vector_store'),
-                upload_path=os.getenv('UPLOAD_PATH', './data/uploads'),
-                conversations_path=os.getenv('CONVERSATIONS_PATH', './data/conversations')
-            )
-            
-            # Check if there are existing documents to load
-            upload_path = os.getenv('UPLOAD_PATH', './data/uploads')
-            if os.path.exists(upload_path):
-                pdf_files = [f for f in os.listdir(upload_path) if f.endswith('.pdf')]
-                if pdf_files:
-                    with st.spinner(f"📚 Loading {len(pdf_files)} existing documents..."):
-                        success = st.session_state.agent.load_documents()
-                        if success:
-                            st.success(f"✅ Loaded {len(pdf_files)} documents from previous session")
-            
-            # Initialize or load conversation
-            conversations = st.session_state.agent.conversation_manager.list_conversations()
-            if conversations:
-                # Load the most recent conversation
-                latest_conv = st.session_state.agent.conversation_manager.load_conversation(conversations[0]['id'])
-                st.session_state.agent.set_current_conversation(latest_conv)
-                st.session_state.current_conversation_id = latest_conv.id
-            else:
-                # Create a new conversation
-                new_conv = st.session_state.agent.conversation_manager.create_conversation()
-                st.session_state.agent.set_current_conversation(new_conv)
-                st.session_state.current_conversation_id = new_conv.id
+if 'user_api_key' not in st.session_state:
+    st.session_state.user_api_key = ""
+
+if 'query_count' not in st.session_state:
+    st.session_state.query_count = 0
+
+if 'approx_tokens' not in st.session_state:
+    st.session_state.approx_tokens = 0
+
+# Main App Logic - API Key Input Screen
+if not st.session_state.api_key_provided:
+    # Show API Key Input Screen
+    st.markdown("""
+    <div style="text-align: center; margin-bottom: 20px;">
+        <div style="font-size: 3em; font-weight: 800; letter-spacing: 4px; padding: 20px 10px;">
+            <span style="color: #FF9933;">🧘 P</span>
+            <span style="color: #FF9933;">R</span>
+            <span style="color: #FF9933;">A</span>
+            <span style="color: #666;">G</span>
+            <span style="color: #138808;">Y</span>
+            <span style="color: #138808;">A</span>
+        </div>
+        <div class="flag-bar">
+            <div class="saffron"></div>
+            <div class="white"></div>
+            <div class="green"></div>
+        </div>
+        <p class="pragya-subtitle">प्रज्ञा - Your Intelligent Knowledge Companion</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # IMPORTANT NOTICE - Landing Page Notice
+    st.info("""
+    ℹ️ **Important Notice:** This application requires your own Anthropic Claude API key to function.
+    
+    • **Your API key = Your usage costs** - You pay directly to Anthropic for what you use
+    • **Complete privacy** - Your key is never stored, logged, or shared
+    • **Session-only** - Key is only active during your current browser session
+    • **Full control** - Monitor your usage at console.anthropic.com
+    
+    💡 New to Claude? Anthropic offers free credits when you sign up!
+    """)
+    
+    # API Key Container
+    st.markdown('<div class="api-key-container">', unsafe_allow_html=True)
+    st.markdown('<h2 class="api-key-header">🔐 Enter Your Claude API Key</h2>', unsafe_allow_html=True)
+    
+    st.markdown("""
+    To use PRAGYA, please provide your own Anthropic Claude API key. Your key is:
+    - ✅ **Never stored permanently** - only in your session
+    - ✅ **Not logged or tracked** - completely private
+    - ✅ **Used only for your queries** - direct API calls
+    """)
+    
+    # API Key Input
+    api_key_input = st.text_input(
+        "Claude API Key",
+        type="password",
+        placeholder="sk-ant-...",
+        help="Get your API key from https://console.anthropic.com",
+        key="api_key_input"
+    )
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    
+    with col2:
+        if st.button("🚀 Initialize PRAGYA", use_container_width=True, type="primary"):
+            if validate_api_key(api_key_input):
+                # First test the API key
+                with st.spinner("🔐 Validating API key..."):
+                    is_valid, error_msg = test_api_key(api_key_input)
                 
-        except Exception as e:
-            st.error(f"Failed to initialize PRAGYA: {str(e)}")
-            st.info("Try clearing the cache: rm -rf ~/.cache/huggingface/hub/")
-            st.stop()
+                if is_valid:
+                    with st.spinner("🕉️ Initializing PRAGYA with your API key..."):
+                        agent = init_agent_with_key(api_key_input)
+                        if agent:
+                            st.session_state.agent = agent
+                            st.session_state.api_key_provided = True
+                            st.session_state.user_api_key = api_key_input
+                            st.session_state.messages = []
+                            if agent.current_conversation:
+                                st.session_state.current_conversation_id = agent.current_conversation.id
+                                st.session_state.messages = agent.current_conversation.messages
+                            st.success("✅ PRAGYA initialized successfully!")
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.error("❌ Failed to initialize. Please try again.")
+                else:
+                    st.error(f"❌ {error_msg}")
+                    if "rate limit" in error_msg.lower():
+                        st.info("💡 Tip: Wait a few minutes before trying again, or check your API usage limits at console.anthropic.com")
+            else:
+                st.error("❌ Invalid API key format. Claude API keys start with 'sk-ant-'")
+                st.info("💡 Get your API key from: https://console.anthropic.com/account/keys")
+    
+    st.markdown('<div class="security-notice">', unsafe_allow_html=True)
+    st.markdown("""
+    🔒 **Security Notice:** Your API key is used only during this session and is never stored on our servers.
+    For maximum security, consider using a restricted API key with limited usage quotas.
+    """)
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Instructions Section
+    with st.expander("📖 How to get your Claude API Key", expanded=False):
+        st.markdown("""
+        1. **Sign up** at [Anthropic Console](https://console.anthropic.com)
+        2. Navigate to **API Keys** section
+        3. Click **Create Key**
+        4. Copy your key (starts with `sk-ant-`)
+        5. Paste it above and click Initialize
+        
+        **Note:** New accounts get free credits to start. Monitor your usage in the Anthropic console.
+        """)
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # Features Overview
+    st.markdown("---")
+    st.markdown("### ✨ What PRAGYA Offers")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.markdown("""
+        **📚 Document Intelligence**
+        - Upload & analyze PDFs
+        - Semantic search
+        - Context-aware Q&A
+        - Multi-document synthesis
+        """)
+    
+    with col2:
+        st.markdown("""
+        **🌐 Web Integration**
+        - Real-time web search
+        - Current information
+        - Fact verification
+        - Source attribution
+        """)
+    
+    with col3:
+        st.markdown("""
+        **💬 Smart Conversations**
+        - Persistent chat history
+        - Multi-session management
+        - Context retention
+        - Intelligent routing
+        """)
+    
+    # Footer
+    st.markdown("---")
+    st.markdown(f"""
+    <div style='text-align: center; padding: 20px;'>
+        <p style='color: #666;'>
+            Developed by <strong>{DEVELOPER}</strong> | {PROJECT_VERSION}<br>
+            <small>Your API key • Your usage • Complete privacy</small>
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Stop execution here if no API key
+    st.stop()
 
+# If API key is provided, continue with the main app
 # Initialize other session states
 if 'messages' not in st.session_state:
-    # Load messages from current conversation if exists
     if st.session_state.agent.current_conversation:
         st.session_state.messages = st.session_state.agent.current_conversation.messages
     else:
@@ -445,46 +694,6 @@ if 'last_upload_count' not in st.session_state:
 if 'show_conversation_list' not in st.session_state:
     st.session_state.show_conversation_list = False
 
-# Helper function to get files hash
-def get_files_hash(files):
-    """Create a hash of uploaded files to detect changes"""
-    if not files:
-        return None
-    hash_obj = hashlib.md5()
-    for file in files:
-        hash_obj.update(file.name.encode())
-        hash_obj.update(str(file.size).encode())
-    return hash_obj.hexdigest()
-
-# Helper function to switch conversation
-def switch_conversation(conv_id):
-    """Switch to a different conversation"""
-    conversation = st.session_state.agent.conversation_manager.load_conversation(conv_id)
-    if conversation:
-        st.session_state.agent.set_current_conversation(conversation)
-        st.session_state.current_conversation_id = conv_id
-        st.session_state.messages = conversation.messages
-        st.rerun()
-
-# Helper function to create new conversation
-def create_new_conversation():
-    """Create a new conversation"""
-    new_conv = st.session_state.agent.conversation_manager.create_conversation()
-    st.session_state.agent.set_current_conversation(new_conv)
-    st.session_state.current_conversation_id = new_conv.id
-    st.session_state.messages = []
-    st.rerun()
-
-# Helper function to delete conversation
-def delete_conversation(conv_id):
-    """Delete a conversation"""
-    if conv_id == st.session_state.current_conversation_id:
-        # If deleting current conversation, create a new one
-        create_new_conversation()
-    else:
-        st.session_state.agent.conversation_manager.delete_conversation(conv_id)
-        st.rerun()
-
 # Sidebar with Enhanced Design
 with st.sidebar:
     # PRAGYA Branding with crisp tricolor theme
@@ -507,6 +716,23 @@ with st.sidebar:
     </div>
     """, unsafe_allow_html=True)
     st.markdown(f'<p class="pragya-subtitle">{PROJECT_HINDI}</p>', unsafe_allow_html=True)
+    
+    # API Key Status
+    st.markdown("### 🔐 API Configuration")
+    st.success(f"✅ Using your API key: sk-ant-...{st.session_state.user_api_key[-8:]}")
+    
+    if st.button("🔄 Change API Key", use_container_width=True):
+        st.session_state.api_key_provided = False
+        st.session_state.user_api_key = ""
+        if 'agent' in st.session_state:
+            del st.session_state.agent
+        st.rerun()
+    
+    # Usage Monitor
+    with st.expander("📊 Session Usage", expanded=False):
+        st.metric("Queries", st.session_state.query_count)
+        st.metric("Est. Tokens", f"{st.session_state.approx_tokens:,}")
+        st.caption("Monitor actual usage at console.anthropic.com")
     
     # Elegant divider
     st.markdown("---")
@@ -901,13 +1127,15 @@ for message in st.session_state.messages:
                                     source_name = source[:50] + "..." if len(source) > 50 else source
                                     st.markdown(f"{i}. 📄 {source_name}")
 
-# Enhanced Chat Input
+# Enhanced Chat Input with Error Handling
 if prompt := st.chat_input(f"Ask {PROJECT_NAME} anything... (प्रज्ञा से कुछ भी पूछें)", key="chat_input"):
     if st.session_state.processing_documents:
         st.warning("⏳ Please wait, documents are being indexed...")
     else:
-        # Add user message with animation
+        # Add user message
         st.session_state.messages.append({"role": "user", "content": prompt})
+        st.session_state.query_count += 1
+        st.session_state.approx_tokens += len(prompt.split()) * 1.3
 
         with st.chat_message("user", avatar="👤"):
             st.markdown(prompt)
@@ -919,59 +1147,123 @@ if prompt := st.chat_input(f"Ask {PROJECT_NAME} anything... (प्रज्ञ�
             # Enhanced thinking status
             with st.status(f"🧘 {PROJECT_NAME} is contemplating...", expanded=True) as status:
                 status.update(label="🔍 Analyzing query...", state="running")
-                response: AgentResponse = st.session_state.agent.process_query(prompt)
-                status.update(label="✨ Wisdom delivered!", state="complete", expanded=False)
-
-            # Display response with animation
-            message_placeholder.markdown(response.answer)
-
-            # Enhanced metadata display
-            with metadata_placeholder.container():
-                metadata_items = []
                 
-                tool_emoji = {
-                    "rag_search": "📚",
-                    "web_search": "🌐",
-                    "general_knowledge": "🧠",
-                    "rag_search + web_search": "📚🌐",
-                    "combined": "📚🌐"
-                }.get(response.tool_used, "🛠️")
-                metadata_items.append(f"{tool_emoji} {response.tool_used}")
-                
-                if response.confidence >= 0.8:
-                    metadata_items.append(f"✅ {response.confidence:.0%}")
-                elif response.confidence >= 0.6:
-                    metadata_items.append(f"📊 {response.confidence:.0%}")
-                else:
-                    metadata_items.append(f"⚠️ {response.confidence:.0%}")
-                
-                metadata_items.append(f"⏱️ {datetime.now().strftime('%H:%M')}")
-                
-                if response.sources:
-                    metadata_items.append(f"📚 {len(response.sources)} sources")
-                
-                st.caption(" • ".join(metadata_items))
-                
-                # Sources display
-                if response.sources:
-                    with st.expander("📚 View Sources", expanded=False):
-                        for i, source in enumerate(response.sources, 1):
-                            if isinstance(source, str) and source.startswith("http"):
-                                domain = source.split('/')[2] if len(source.split('/')) > 2 else source[:30]
-                                st.markdown(f"{i}. 🔗 [{domain}]({source})")
+                try:
+                    response: AgentResponse = st.session_state.agent.process_query(prompt)
+                    
+                    # Check if response indicates an authentication error
+                    if "Authentication Error" in response.answer or "Invalid API key" in response.answer:
+                        status.update(label="❌ Authentication Error", state="error", expanded=True)
+                        message_placeholder.error(response.answer)
+                        
+                        col1, col2, col3 = st.columns([1, 2, 1])
+                        with col2:
+                            if st.button("🔐 Update API Key", use_container_width=True, type="primary"):
+                                st.session_state.api_key_provided = False
+                                st.session_state.user_api_key = ""
+                                if 'agent' in st.session_state:
+                                    del st.session_state.agent
+                                st.rerun()
+                    
+                    elif "Rate Limit" in response.answer:
+                        status.update(label="⏱️ Rate Limit Exceeded", state="error", expanded=True)
+                        message_placeholder.warning(response.answer)
+                        
+                        with st.expander("ℹ️ What to do about rate limits", expanded=True):
+                            st.markdown(f"""
+                            **Rate limits are temporary restrictions on API usage:**
+                            
+                            1. **Wait a few minutes** - Rate limits reset quickly
+                            2. **Check your usage** - Visit console.anthropic.com
+                            3. **Upgrade your plan** - If you need higher limits
+                            4. **Optimize queries** - Combine multiple questions into one
+                            
+                            Your current API key: `sk-ant-...{st.session_state.user_api_key[-8:]}`
+                            """)
+                    
+                    elif "Connection Error" in response.answer:
+                        status.update(label="🌐 Connection Error", state="error", expanded=True)
+                        message_placeholder.error(response.answer)
+                        
+                        if st.button("🔄 Retry", use_container_width=True):
+                            st.rerun()
+                    
+                    else:
+                        # Normal successful response
+                        status.update(label="✨ Wisdom delivered!", state="complete", expanded=False)
+                        
+                        # Update token count
+                        st.session_state.approx_tokens += len(response.answer.split()) * 1.3
+                        
+                        # Display response
+                        message_placeholder.markdown(response.answer)
+                        
+                        # Enhanced metadata display
+                        with metadata_placeholder.container():
+                            metadata_items = []
+                            
+                            tool_emoji = {
+                                "rag_search": "📚",
+                                "web_search": "🌐",
+                                "general_knowledge": "🧠",
+                                "rag_search + web_search": "📚🌐",
+                                "combined": "📚🌐"
+                            }.get(response.tool_used, "🛠️")
+                            metadata_items.append(f"{tool_emoji} {response.tool_used}")
+                            
+                            if response.confidence >= 0.8:
+                                metadata_items.append(f"✅ {response.confidence:.0%}")
+                            elif response.confidence >= 0.6:
+                                metadata_items.append(f"📊 {response.confidence:.0%}")
                             else:
-                                source_name = source[:50] + "..." if len(source) > 50 else source
-                                st.markdown(f"{i}. 📄 {source_name}")
-
-            # Save to messages
-            st.session_state.messages.append({
-                "role": "assistant",
-                "content": response.answer,
-                "sources": response.sources,
-                "tool_used": response.tool_used,
-                "confidence": response.confidence,
-                "timestamp": datetime.now().isoformat()
-            })
+                                metadata_items.append(f"⚠️ {response.confidence:.0%}")
+                            
+                            metadata_items.append(f"⏱️ {datetime.now().strftime('%H:%M')}")
+                            
+                            if response.sources:
+                                metadata_items.append(f"📚 {len(response.sources)} sources")
+                            
+                            st.caption(" • ".join(metadata_items))
+                            
+                            # Sources display
+                            if response.sources:
+                                with st.expander("📚 View Sources", expanded=False):
+                                    for i, source in enumerate(response.sources, 1):
+                                        if isinstance(source, str) and source.startswith("http"):
+                                            domain = source.split('/')[2] if len(source.split('/')) > 2 else source[:30]
+                                            st.markdown(f"{i}. 🔗 [{domain}]({source})")
+                                        else:
+                                            source_name = source[:50] + "..." if len(source) > 50 else source
+                                            st.markdown(f"{i}. 📄 {source_name}")
+                        
+                        # Save to messages only if successful
+                        st.session_state.messages.append({
+                            "role": "assistant",
+                            "content": response.answer,
+                            "sources": response.sources,
+                            "tool_used": response.tool_used,
+                            "confidence": response.confidence,
+                            "timestamp": datetime.now().isoformat()
+                        })
+                
+                except Exception as e:
+                    status.update(label="❌ Error occurred", state="error", expanded=True)
+                    error_msg = str(e)
+                    
+                    if "authentication" in error_msg.lower() or "api key" in error_msg.lower():
+                        message_placeholder.error(
+                            "🔐 **Authentication Error**\n\n"
+                            "Your API key appears to be invalid. Please update it."
+                        )
+                        if st.button("🔐 Update API Key", use_container_width=True):
+                            st.session_state.api_key_provided = False
+                            st.rerun()
+                    else:
+                        message_placeholder.error(
+                            f"❌ **Error Processing Query**\n\n"
+                            f"An error occurred: {error_msg}\n\n"
+                            f"Please try again or check your API key."
+                        )
 
 # Enhanced Welcome Screen
 if not st.session_state.messages:
@@ -1079,6 +1371,9 @@ st.markdown(f"""
         <div class="white"></div>
         <div class="green"></div>
     </div>
+    <p style='color: #888; font-size: 0.85em; margin-top: 10px;'>
+        🔐 Using your personal API key | Monitor usage at console.anthropic.com
+    </p>
     <p style='color: #666; margin: 10px 0 5px 0;'>
         <strong>Powered by:</strong> Claude AI 🤖 | ChromaDB 🗄️ | Google Search 🔎
     </p>
